@@ -104,8 +104,4 @@ config.json     配置（首次运行会按默认值重建）
 
 本项目代码以 GPL-3.0 发布，详见 `LICENSE`。
 
-> `LICENSE` 里目前是版权声明 + 获取完整正文的方式；
-> 正式发布前建议用 GitHub 建仓库时选 "GNU GPL v3.0" 自动生成完整文本，
-> 或把 https://www.gnu.org/licenses/gpl-3.0.txt 的内容整段贴进去。
-
 游戏素材版权归鹰角网络，仅作同人工具使用，请勿商用。
