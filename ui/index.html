@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Endfield RotPilot</title>
+<link rel="icon" type="image/png" href="/ui/icon.png?v=155">
+<link rel="shortcut icon" href="/ui/favicon.ico?v=155">
+<link rel="apple-touch-icon" href="/ui/icon.png?v=155">
+<link rel="stylesheet" href="/ui/style.css?v=156">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img class="mark" src="/ui/icon64.png?v=155" alt="">
+    <b>Endfield RotPilot</b>
+  </div>
+  <div class="actions">
+    <button class="ghost bili-btn" id="btnBili"><img class="bili-ava" src="/ui/bili_avatar.jpg" alt=""><span id="biliName">B站主页</span></button>
+    <button class="ghost" id="btnDocs" title="共享文档（腾讯文档）">共享文档</button>
+    <button class="ghost" id="btnQQ">交流群</button>
+    <button class="ghost" id="btnPan">新版本和新干员</button>
+    <button class="ghost" id="btnShare">分享码</button>
+    <button class="ghost" id="btnImport">导入</button>
+    <button class="ghost" id="btnSave">保存</button>
+    <button class="ghost" id="btnStop">停止运行</button>
+    <button class="primary" id="btnRun">开始运行</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel left">
+    <div class="panel-head"><h2>编队</h2><span class="sub" id="teamHint">4 名干员</span></div>
+    <div class="slots" id="slots"></div>
+    <div class="row-btns">
+      <button class="mini" id="btnAddOp">添加干员</button>
+      <button class="mini" id="btnQuick">快捷编队</button>
+      <button class="mini danger" id="btnClearTeam">清空</button>
+    </div>
+
+    <div class="panel-head mt"><h2>编队库</h2><span class="sub" id="compCount">0 套</span></div>
+    <div class="lib" id="comps"></div>
+    <div class="row-btns">
+      <button class="mini" id="btnSaveComp">保存当前编队</button>
+      <button class="mini" id="btnCompAll">全部</button>
+    </div>
+
+    <div class="panel-head mt"><h2>技能轴库</h2><span class="sub" id="libCount">0 套</span>
+      <span style="margin-left:auto;display:flex;gap:4px">
+        <button class="mini" id="btnLibBackup" type="button" title="把所有轴和编队导成一个文件（换电脑用）">备份</button>
+        <button class="mini" id="btnLibRestore" type="button" title="从备份文件恢复；同名会加序号，不覆盖现有的">恢复</button>
+        <button class="mini" id="btnLibDemo" type="button" title="把「示例甲 / 示例乙」两条教学轴放进轴库（不会动你当前的轴）">示例</button>
+      </span>
+      <input type="file" id="libFile" accept=".json,application/json" style="display:none">
+    </div>
+    <div class="lib-search"><input id="libSearch" type="text" placeholder="搜轴名或干员…"></div>
+    <div class="lib" id="lib"></div>
+  </section>
+
+  <section class="panel center">
+    <div class="panel-head">
+      <h2>技能轴</h2>
+      <span class="sub" id="seqHint">点击下方按钮添加技能</span>
+      <span class="head-right">
+        <span class="alpha-ctl" title="运行条透明度 · 运行中拖动即时生效（也可按 F6 / F7）">
+          <span class="alpha-lab">运行条透明度</span>
+          <input type="range" id="alphaRange" min="10" max="100" step="1" value="94">
+          <b class="alpha-val" id="alphaVal">94%</b>
+        </span>
+      </span>
+    </div>
+    <div class="seq-wrap">
+      <div class="seq" id="seq"><div class="caret-line" id="caretLine"></div></div>
+    </div>
+    <div class="adder">
+      <div class="adder-group" id="adderSkill">
+        <span class="adder-label">战技</span>
+      </div>
+      <div class="adder-group" id="adderLink">
+      </div>
+      <div class="adder-group" id="adderUlt">
+        <span class="adder-label">终结技</span>
+      </div>
+      <div class="adder-group" id="adderHeavy">
+        <span class="adder-label">重击</span>
+        <button class="skill-btn" id="btnHeavy" title="重击（无需按键，仅提示）">
+          <img src="/img/heavy" alt="">
+        </button>
+      </div>
+      <div class="adder-group tools">
+        <button class="mini" id="btnUndo">↶ 撤销</button>
+        <button class="mini" id="btnRedo" title="重做（Ctrl+Y）">↷ 重做</button>
+        <button class="mini" id="btnLeft">◀ 左移</button>
+        <button class="mini" id="btnRight">▶ 右移</button>
+        <button class="mini" id="btnNote">加注释</button>
+        <button class="mini" id="btnDivider">插入分段</button>
+        <button class="mini" id="btnBreak">换行</button>
+        <button class="mini" id="btnRepeat" title="插入反复记号：插两个就会自动配对，双击记号改次数">反复</button>
+        <button class="mini danger" id="btnDelete">删除所选</button>
+        <button class="mini danger" id="btnClearSeq">清空序列</button>
+        <button class="mini" id="btnSettings">设置</button>
+        <button class="mini danger quit-inline" id="btnQuitAll" title="关闭主窗口并退出后台 Python">退出程序</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 选人 -->
+<div class="modal hidden" id="picker">
+  <div class="modal-card">
+    <div class="modal-head">
+      <span id="pickerTitle">选择干员</span>
+      <button class="x" id="pickerClose">×</button>
+    </div>
+    <div class="tabs" id="pickerTabs"></div>
+    <div class="grid" id="pickerGrid"></div>
+    <div class="modal-foot">
+      <button class="mini danger" id="pickerClear">清空编队</button>
+      <button class="primary" id="pickerDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分享码 -->
+<div class="modal hidden" id="shareModal">
+  <div class="modal-card">
+    <div class="modal-head"><span>分享码</span><button class="x" id="shareClose">×</button></div>
+    <div class="set-row" style="align-items:center;gap:10px">
+      <label style="flex:0 0 auto">轴名字</label>
+      <input id="shareName" type="text" maxlength="40" placeholder="对方导入后会按这个名字存进技能轴库"
+             style="flex:1 1 auto;padding:6px 8px;border:1px solid var(--line-2);background:#fffdf6">
+    </div>
+    <div class="set-row" style="align-items:center;gap:10px">
+      <label style="flex:0 0 auto">导出格式</label>
+      <select class="padsel" id="shareMode" style="flex:1 1 auto">
+        <option value="rp2">RP2 · 兼容（推荐，谁都能读）</option>
+        <option value="rp3">RP3 · 压缩（码短一截，对方要新版）</option>
+      </select>
+      <button class="mini" id="btnExportJson" type="button">导出 JSON</button>
+    </div>
+    <div class="hint" id="shareVerHint" style="margin:0 0 8px"></div>
+    <textarea id="shareText" spellcheck="false"></textarea>
+    <div class="modal-foot">
+      <span class="sub" id="shareLen"></span>
+      <button class="mini" id="shareDocs" type="button" style="margin-left:auto"
+              title="作者的共享文档（轴库 / 干员资料）">共享文档</button>
+      <button class="primary" id="shareCopy">复制</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入 -->
+<div class="modal hidden" id="importModal">
+  <div class="modal-card">
+    <div class="modal-head"><span>导入分享码</span><button class="x" id="importClose">×</button></div>
+    <textarea id="importText" spellcheck="false"
+              placeholder="粘贴分享码（整段聊天记录也行，会自动挑出 RP2:/RP3: 那段）；也能直接粘「导出 JSON」的内容"></textarea>
+    <!-- 预览：点「预览」在下方展开，跟编轴时一模一样的画面 -->
+    <div id="importPreviewBox" class="hidden" style="margin-top:10px">
+      <div class="sub" id="importPreviewMeta" style="margin-bottom:6px"></div>
+      <div class="seq preview" id="importPreview"></div>
+      <div class="hint" id="importPreviewWarn" style="margin:6px 0 0"></div>
+    </div>
+    <div class="modal-foot">
+      <span class="sub" id="importMsg"></span>
+      <button class="mini" id="importDocs" type="button" style="margin-left:auto"
+              title="没有分享码？去作者的共享文档里找">共享文档</button>
+      <button class="mini" id="importPreviewBtn" type="button">预览</button>
+      <button class="primary" id="importOk">导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="setModal">
+  <div class="modal-card set-card">
+    <div class="modal-head"><span>设置</span><button class="x" id="setClose">×</button></div>
+
+    <div class="set-wrap">
+      <nav class="set-nav" id="setNav">
+        <button type="button" data-pane="overlay" class="on">运行条</button>
+        <button type="button" data-pane="screen">屏幕与显示</button>
+        <button type="button" data-pane="keyboard">键盘</button>
+        <button type="button" data-pane="pad">手柄</button>
+        <button type="button" data-pane="hotkey">快捷键</button>
+        <button type="button" data-pane="about">关于</button>
+      </nav>
+
+      <div class="set-panes" id="setPanes">
+
+        <!-- 运行条 -->
+        <section class="set-pane" data-pane="overlay">
+          <div class="pane-title">运行条</div>
+          <div class="set-row"><label>长按判定（毫秒）<br><span class="hint">按住超过这个时间才算“长按 = 终结技”</span></label>
+            <input id="setHold" type="number" min="80" max="2000"></div>
+          <div class="set-row"><label>不透明度</label>
+            <input id="setAlpha" type="number" min="0.3" max="1" step="0.02"></div>
+          <div class="set-row"><label>图标大小（px）</label>
+            <input id="setIcon" type="number" min="32" max="140" step="2"></div>
+          <div class="set-row"><label>整体缩放<br><span class="hint">图标、文字、间距一起缩放（0.7 ~ 1.5）</span></label>
+            <input id="setScale" type="number" min="0.7" max="1.5" step="0.05" placeholder="1.00"></div>
+          <div class="set-row"><label>显示接下来 2 格<br><span class="hint">右侧淡一点显示后面两步，跑连招时提前知道按什么</span></label>
+            <span class="mode-group">
+              <label class="mode-opt"><input type="radio" name="nextPrev" value="1" id="nextPrevOn"> 显示</label>
+              <label class="mode-opt"><input type="radio" name="nextPrev" value="0" id="nextPrevOff"> 不显示</label>
+            </span></div>
+        </section>
+
+        <!-- 屏幕与显示 -->
+        <section class="set-pane" data-pane="screen" hidden>
+          <div class="pane-title">屏幕与显示</div>
+          <div class="set-row"><label>运行时放在哪块屏</label>
+            <select class="padsel" id="setScreen">
+              <option value="game">跟随游戏窗口（推荐）</option>
+              <option value="primary">主屏</option>
+              <option value="secondary">副屏</option>
+            </select></div>
+          <div class="hint" style="margin:0 0 10px" id="screenHint">正在检测显示器…</div>
+          <div class="set-row"><label>距屏幕顶部（px）</label><input id="setOY" type="number" min="0" max="2000" step="10"></div>
+          <div class="set-row"><label>水平位置（留空 = 居中）</label><input id="setOX" type="number" min="0" max="4000" step="10" placeholder="居中"></div>
+
+          <div class="set-sub">运行条上显示什么</div>
+          <div class="set-row"><label>按键显示</label>
+            <span class="mode-group">
+              <label class="mode-opt"><input type="radio" name="displayMode" value="kb" id="modeDisplayKb"> 键鼠</label>
+              <label class="mode-opt"><input type="radio" name="displayMode" value="pad" id="modeDisplayPad"> 手柄</label>
+            </span></div>
+          <div class="hint" style="margin:0 0 10px">只改条上写的键名，键鼠和手柄始终同时生效。</div>
+          <div class="set-row"><label>当前技能突出显示</label>
+            <span class="mode-group">
+              <label class="mode-opt"><input type="radio" name="overlayStyle" value="focus" id="modeStyleFocus"> 聚焦</label>
+              <label class="mode-opt"><input type="radio" name="overlayStyle" value="box" id="modeStyleBox"> 框选</label>
+              <label class="mode-opt"><input type="radio" name="overlayStyle" value="both" id="modeStyleBoth"> 兼容</label>
+            </span></div>
+          <div class="hint" style="margin:0">聚焦 = 当前步高亮、其余变淡；框选 = 只给当前步加框；兼容 = 两者都做。</div>
+        </section>
+
+        <!-- 键盘 -->
+        <section class="set-pane" data-pane="keyboard" hidden>
+          <div class="pane-title">键盘</div>
+          <div id="kbSection">
+            <div class="set-row"><label>战技 1 / 2 / 3 / 4</label>
+              <span class="key-group">
+                <input class="keyin" id="setSkill1" readonly placeholder="1">
+                <input class="keyin" id="setSkill2" readonly placeholder="2">
+                <input class="keyin" id="setSkill3" readonly placeholder="3">
+                <input class="keyin" id="setSkill4" readonly placeholder="4">
+              </span></div>
+            <div class="set-row"><label>终结技 1 / 2 / 3 / 4<br><span class="hint">留空 = 长按战技键，或按住 Alt 再按战技键</span></label>
+              <span class="key-group">
+                <input class="keyin" id="setUlt1" readonly placeholder="-">
+                <input class="keyin" id="setUlt2" readonly placeholder="-">
+                <input class="keyin" id="setUlt3" readonly placeholder="-">
+                <input class="keyin" id="setUlt4" readonly placeholder="-">
+              </span></div>
+            <div class="set-row"><label>连携技</label>
+              <input class="keyin" id="setLink" readonly placeholder="E"></div>
+            <div class="hint" style="margin:6px 0 0">点一下输入框，按下想用的键即可（终结技键按 Backspace 可清空）。</div>
+          </div>
+          <div class="set-sub">快速输入</div>
+          <div class="hint" style="margin:0">
+            Q + 1~4 战技　·　E + 1~4 连携　·　Alt + 1~4 终结　·　H 重击<br>
+            前三个都是「按住不放再按数字」，松开就失效；单独按数字不会插入技能。
+          </div>
+        </section>
+
+        <!-- 手柄 -->
+        <section class="set-pane" data-pane="pad" hidden>
+          <div class="pane-title">手柄</div>
+          <div id="padSection">
+            <div class="set-row"><label>检测到的设备</label>
+              <span class="hint" id="padDevices" style="margin:0;text-align:right">点「刷新」检测</span></div>
+            <div class="set-row"><label>当前按下（实时）</label>
+              <span class="hint" id="padLive" style="margin:0">—</span></div>
+            <div class="set-row"><label>修饰键（按住不放）</label>
+              <span style="display:flex;align-items:center;gap:6px">
+                <select class="padsel" id="padMod"></select>
+                <button class="mini" id="padDs" type="button">DS</button>
+                <button class="mini" id="padXbox" type="button">Xbox</button>
+                <button class="mini" id="padRefresh" type="button">刷新</button>
+              </span></div>
+            <div class="set-row"><label>1~4 号位面键</label>
+              <span class="key-group">
+                <input class="padin padslot" id="padSlot1" readonly placeholder="-">
+                <input class="padin padslot" id="padSlot2" readonly placeholder="-">
+                <input class="padin padslot" id="padSlot3" readonly placeholder="-">
+                <input class="padin padslot" id="padSlot4" readonly placeholder="-">
+              </span></div>
+            <div class="set-row"><label>连携技</label>
+              <select class="padsel" id="padLink"></select></div>
+            <div class="hint" style="margin:6px 0 0">
+              先选 DS / Xbox（会自动识别），下拉里只会有这套手柄能用的键。<br>
+              连携键可以和某个面键设成同一个：按住修饰键 + 面键 = 战技，单按面键 = 连携。
+            </div>
+          </div>
+        </section>
+
+        <!-- 快捷键 -->
+        <section class="set-pane" data-pane="hotkey" hidden>
+          <div class="pane-title">快捷键</div>
+          <div class="set-row"><label>退出运行</label><input class="keyin" id="setExit" readonly placeholder="F8"></div>
+          <div class="set-row"><label>重置到开头</label><input class="keyin" id="setReset" readonly placeholder="F9"></div>
+          <div class="set-row"><label>临时开 / 关反复</label><input class="keyin" id="setLoopToggle" readonly placeholder="F10"></div>
+          <div class="set-row"><label>回到反复起点</label><input class="keyin" id="setLoopJump" readonly placeholder="F11"></div>
+          <div class="set-row"><label>运行条变淡</label><input class="keyin" id="setAlphaDown" readonly placeholder="F6"></div>
+          <div class="set-row"><label>运行条变实</label><input class="keyin" id="setAlphaUp" readonly placeholder="F7"></div>
+          <div class="hint" style="margin:6px 0 0">键鼠和手柄同时生效，两套都能用。F10 / F11 只在运行条跑着的时候有用。</div>
+          <div class="set-sub">反复记号在哪设</div>
+          <div class="hint" style="margin:0" id="repHint">反复（重复记号）不在这里设：在技能轴底部点「反复」，
+            在要回头的地方插两个记号配对即可，次数直接点数上的 － / ＋。</div>
+        </section>
+
+        <!-- 关于 -->
+        <section class="set-pane" data-pane="about" hidden>
+          <div class="pane-title">关于</div>
+          <div class="set-row"><label>版本</label>
+            <span class="sub" id="aboutVer" style="margin:0">读取中…</span></div>
+          <div class="set-row"><label>更新说明</label>
+            <button class="mini" id="btnAboutNotes" type="button" style="margin-left:auto">看这一版更新了什么</button></div>
+          <div class="set-row"><label>关闭窗口时退出程序<br><span class="hint">默认关：关窗口后后台还在，刷新页面能回来</span></label>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="setAutoExit"><span class="sub" style="margin:0">关窗就退出</span></span></div>
+
+          <div class="set-sub">权限 / 排错</div>
+          <div class="set-row"><label>管理员权限</label>
+            <span style="display:flex;align-items:center;gap:10px">
+              <span id="adminState" class="hint" style="margin:0">检查中…</span>
+              <button class="mini" id="btnLastLog" type="button">查看最近日志</button>
+            </span></div>
+          <div class="hint" style="margin:0" id="adminHint"></div>
+
+          <div class="set-sub">更新 / 补丁</div>
+          <div class="set-row"><label>补丁包<br><span class="hint">拿到新的补丁 .zip，在这里直接导入，不用手动替换文件</span></label>
+            <span style="display:flex;align-items:center;gap:6px;margin-left:auto">
+              <button class="mini" id="btnPatchRestore" title="把上一次补丁覆盖的文件还原">还原上一版</button>
+              <button class="mini" id="btnPatchImport" title="导入补丁包（.zip），立即更新程序">导入补丁</button>
+            </span></div>
+          <input type="file" id="patchFile" accept=".zip" style="display:none">
+        </section>
+
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <span class="sub">改完点保存；直接关掉不会丢已有设置</span>
+      <button class="mini" id="setClose2" type="button" style="margin-left:auto">关闭</button>
+      <button class="primary" id="setSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="opFile" accept=".zip" style="display:none">
+<div class="toast" id="toast"></div>
+<script src="/ui/app.js?v=156"></script>
+</body>
+</html>

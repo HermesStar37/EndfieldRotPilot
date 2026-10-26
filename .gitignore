@@ -1,0 +1,20 @@
+# 忽略个人数据 / 运行时产生的文件
+config.json.bak*
+*.tmp
+web_run.log
+*.log
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 补丁 / 备份目录
+_backup/
+_补丁备份/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+_backup*/

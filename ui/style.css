@@ -1,0 +1,713 @@
+/* ==========================================================
+   Endfield RotPilot · 明亮黄白主题（终末地工业风）
+   ========================================================== */
+:root{
+  --paper:#f4f0e4;         /* 页面底 */
+  --paper-2:#faf7ee;
+  --panel:#fffdf6;         /* 面板 */
+  --panel-2:#fff8e1;
+  --line:#1b1a17;          /* 硬边框 */
+  --line-2:#cfc7b2;        /* 淡分隔 */
+  --ink:#141311;           /* 主文字 */
+  --ink-2:#4a463c;
+  --ink-3:#8a8375;
+  --yellow:#ffd000;
+  --yellow-2:#f2c000;
+  --yellow-soft:#fff1b8;
+  --danger:#d33a2c;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;color:var(--ink);
+  font:14px/1.5 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
+  background:
+    linear-gradient(180deg,#f7f3e7 0%,#f2eee1 55%,#ece7d8 100%);
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+/* 淡淡的斜纹底 */
+body:before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(135deg,
+    rgba(255,208,0,.10) 0 2px, transparent 2px 16px);
+}
+
+/* ---------------- 顶栏 ---------------- */
+.topbar{
+  position:relative;z-index:2;height:58px;
+  display:flex;align-items:center;justify-content:space-between;padding:0 18px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+.topbar:after{
+  content:"";position:absolute;left:0;right:0;bottom:-4px;height:4px;
+  background:repeating-linear-gradient(135deg,var(--yellow) 0 12px,#141311 12px 24px);
+}
+.brand{display:flex;align-items:center;gap:10px;letter-spacing:1px}
+.brand b{font-weight:800;font-size:15px;text-transform:uppercase;color:var(--ink)}
+.mark{width:24px;height:24px;display:block;object-fit:contain}
+.tag{
+  font:800 10px/1 Consolas,monospace;letter-spacing:2px;
+  color:var(--yellow);background:var(--ink);padding:3px 7px;
+}
+.actions{display:flex;gap:8px}
+
+/* ---------------- 按钮：直角 ---------------- */
+button{
+  font-family:inherit;font-size:13px;color:var(--ink);
+  background:#fffdf6;border:1px solid var(--line);border-radius:0;
+  padding:8px 15px;cursor:pointer;letter-spacing:.5px;font-weight:600;
+  transition:background .1s linear,color .1s linear;
+}
+button:hover{background:var(--yellow);color:var(--ink)}
+button:active{background:var(--yellow-2)}
+button.primary{
+  background:var(--yellow);border-color:var(--line);color:var(--ink);font-weight:800;
+}
+button.primary:hover{background:var(--yellow-2)}
+button.ghost{background:transparent}
+button.mini{padding:6px 11px;font-size:12px}
+button.danger{color:var(--danger);border-color:#b9a89a;background:#fff8f4}
+button.danger:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+
+/* ---------------- 布局 ---------------- */
+main{
+  position:relative;z-index:1;display:grid;
+  grid-template-columns:clamp(268px,26vw,340px) minmax(0,1fr);
+  gap:12px;height:calc(100% - 58px);padding:12px;min-height:0;
+}
+.panel{
+  position:relative;background:var(--panel);border:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;padding:12px;
+  box-shadow:4px 4px 0 rgba(20,19,17,.06);
+}
+.panel:before{
+  content:"";position:absolute;top:-1px;left:-1px;width:10px;height:10px;
+  background:var(--yellow);
+}
+.panel-head{
+  display:flex;align-items:baseline;justify-content:space-between;
+  margin-bottom:10px;padding-bottom:7px;border-bottom:2px solid var(--line);
+}
+.panel-head.mt{margin-top:14px}
+.panel-head h2{
+  margin:0;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;
+}
+.panel-head h2:before{content:"// ";color:var(--yellow-2)}
+.sub{font-size:11px;color:var(--ink-3);font-family:Consolas,monospace;font-weight:600}
+
+/* ---------------- 编队槽 ---------------- */
+.slots{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.slot{
+  position:relative;height:134px;overflow:hidden;cursor:pointer;
+  background:var(--panel-2);border:1px solid var(--line-2);
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .1s linear,background .1s linear;
+}
+.slot:hover{border-color:var(--line);background:#fffbea}
+.slot:hover:after{
+  content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 2px var(--yellow);
+}
+.slot img{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:contain;object-position:center bottom;
+  background:linear-gradient(180deg,#fffdf6,#fff6d8);
+}
+.slot .name{
+  position:absolute;left:0;right:0;bottom:0;padding:4px 7px;font-size:11px;color:#fff;
+  letter-spacing:.5px;font-weight:600;
+  background:linear-gradient(0deg,rgba(0,0,0,.85),rgba(0,0,0,0));
+}
+.slot .no{
+  position:absolute;top:0;left:0;z-index:2;padding:3px 6px;
+  font:800 10px/1 Consolas,monospace;color:var(--yellow);background:var(--ink);
+}
+.slot .empty{
+  color:#a99f88;font:700 12px/1 "Microsoft YaHei UI";letter-spacing:2px;
+}
+.row-btns{display:flex;gap:8px;margin-top:8px}
+
+/* ---------------- 编队库 ---------------- */
+.lib{overflow:auto;display:flex;flex-direction:column;gap:6px;padding-right:2px}
+.lib-item{
+  display:flex;align-items:center;gap:8px;padding:8px 9px;
+  background:#fffdf6;border:1px solid var(--line-2);cursor:pointer;
+  transition:.1s linear;
+}
+.lib-item:hover{border-color:var(--line);background:var(--yellow-soft)}
+.lib-item b{font-size:12px;font-weight:700}
+.lib-item span{font-size:11px;color:var(--ink-3);font-family:Consolas,monospace;font-weight:600}
+.lib-item .del{margin-left:auto;color:#b9a89a;font-size:13px}
+.lib-item .del:hover{color:var(--danger)}
+
+/* ---------------- 技能轴 ---------------- */
+.seq-wrap{
+  flex:1;overflow:auto;padding:12px;background:#fffdf6;border:1px solid var(--line-2);
+  background-image:
+    linear-gradient(rgba(20,19,17,.035) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(20,19,17,.035) 1px,transparent 1px);
+  background-size:24px 24px;
+}
+.seq{position:relative;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;min-height:60px}
+.seq:empty:after{
+  content:"// 还没有技能 — 点下面的 1 / 2 / 3 / 4 开始排轴";
+  color:#b3a98f;font:700 12px/1.6 Consolas,monospace;letter-spacing:1px;
+  display:flex;align-items:center;justify-content:center;height:120px;width:100%;
+}
+
+.cell-col{display:flex;flex-direction:column;align-items:center;gap:3px}
+.cell{
+  position:relative;width:58px;height:74px;
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  cursor:pointer;user-select:none;border:1px solid transparent;
+  transition:background .1s linear,border-color .1s linear;
+}
+.cell img{width:52px;height:52px;pointer-events:none;filter:drop-shadow(0 2px 3px rgba(20,19,17,.18))}
+.cell .n{margin-top:3px;font:800 10px/1 Consolas,monospace;color:#a1977f;letter-spacing:1px}
+.cell:hover{background:rgba(255,208,0,.16);border-color:rgba(20,19,17,.25)}
+.cell.sel{background:var(--yellow-soft);border-color:var(--line)}
+.cell.sel:after{
+  content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 2px var(--yellow);
+  pointer-events:none;
+}
+.cell.sel .n{color:var(--ink)}
+.cell.dragging{opacity:.35}
+.cell.drag-over-l:before,.cell.drag-over-r:after{
+  content:"";position:absolute;top:2px;bottom:12px;width:3px;background:var(--ink);
+}
+.cell.drag-over-l:before{left:-6px}
+.cell.drag-over-r:after{right:-6px}
+
+.divider{
+  width:58px;height:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:4px;color:var(--ink);font-size:11px;font-weight:700;cursor:pointer;
+  background:var(--yellow-soft);border:1px dashed #b9a86a;
+  transition:.1s linear;
+}
+.divider:hover{border-style:solid;border-color:var(--line);background:#ffe98c}
+.divider .bar{font:800 15px/1 Consolas,monospace;color:var(--yellow-2)}
+
+.break{
+  flex-basis:100%;height:20px;display:flex;align-items:center;justify-content:flex-start;gap:6px;
+  gap:6px;border-bottom:2px dashed #d8cfae;margin:2px 0 4px;position:relative;cursor:pointer;
+}
+.break .brlabel{
+  margin-left:4px;font:700 10px/1 "Microsoft YaHei UI";color:#a89b74;
+  background:#fbf7e6;border:1px solid #ece3c6;padding:2px 6px;pointer-events:none;
+}
+.break:hover{border-bottom-color:var(--yellow-2)}
+.break:hover .brlabel{background:var(--yellow);color:#3b3a33}
+.break .brdel{
+  position:relative;width:16px;height:16px;line-height:14px;text-align:center;
+  font:700 12px/1 Consolas;color:#b03a2e;background:#fff;border:1px solid var(--line);
+  cursor:pointer;display:none;
+}
+.break:hover .brdel{display:block}
+.break.sel{border-bottom-color:var(--yellow-2);background:#fffbdd}
+
+.note-top{
+  max-width:88px;font:700 10px/1.3 Consolas,"Microsoft YaHei UI";color:var(--ink);
+  background:var(--yellow);border:1px solid var(--line);padding:2px 5px;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+}
+.note-top:hover{background:var(--yellow-2)}
+.note-chip{
+  align-self:flex-start;max-width:190px;padding:5px 9px;
+  background:var(--yellow-soft);border:1px solid var(--line);color:var(--ink);
+  font-size:11px;font-weight:600;cursor:pointer;line-height:1.4;
+}
+.note-chip:hover{background:#ffe98c}
+
+/* ---------------- 底部添加区 ---------------- */
+.adder{margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.adder-group{
+  display:flex;align-items:center;gap:7px;padding:7px 9px;
+  background:#fffdf6;border:1px solid var(--line-2);
+}
+.adder-label{
+  font:800 10px/1 "Microsoft YaHei UI";letter-spacing:2px;color:var(--ink);
+  background:var(--yellow);border:1px solid var(--line);padding:4px 7px;margin-right:2px;
+}
+.skill-btn{
+  position:relative;width:38px;height:38px;padding:0;overflow:hidden;
+  border:1px solid var(--line-2);background:#fff;
+  display:flex;align-items:center;justify-content:center;
+}
+.skill-btn img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.skill-btn:hover{border-color:var(--line);box-shadow:inset 0 0 0 2px var(--yellow);background:#fff}
+.skill-btn .k{
+  position:absolute;right:0;bottom:0;z-index:2;padding:1px 3px;
+  font:800 9px/1 Consolas,monospace;color:var(--yellow);background:var(--ink);
+}
+.skill-btn.link{width:auto;min-width:42px;padding:0 8px}
+.adder .mini{white-space:nowrap;padding:6px 10px;font-size:12px}
+
+/* ---------------- 弹窗 ---------------- */
+.modal{
+  position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+  background:rgba(20,19,17,.35);animation:fade .1s linear;
+}
+.modal.hidden{display:none}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.modal-card{
+  width:min(880px,92vw);max-height:84vh;display:flex;flex-direction:column;
+  overflow-y:auto;overscroll-behavior:contain;
+  padding:16px;background:var(--panel);border:1px solid var(--line);
+  box-shadow:8px 8px 0 rgba(20,19,17,.14);
+  animation:pop .1s linear;
+}
+@keyframes pop{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
+.modal-head{
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:-16px;z-index:3;background:var(--panel);
+  margin:-16px -16px 12px;padding:16px 16px 8px;border-bottom:2px solid var(--line);
+  font-weight:800;letter-spacing:2px;font-size:12px;text-transform:uppercase;
+}
+.modal-head span:before{content:"// ";color:var(--yellow-2)}
+.x{
+  background:transparent;border:none;color:var(--ink-2);font-size:18px;
+  line-height:1;padding:0 4px;cursor:pointer;
+}
+.x:hover{color:var(--ink);background:var(--yellow)}
+
+.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tab{
+  padding:5px 13px;font-size:12px;cursor:pointer;letter-spacing:1px;font-weight:700;
+  background:#fffdf6;border:1px solid var(--line-2);color:var(--ink-2);
+}
+.tab:hover{border-color:var(--line);background:var(--yellow-soft)}
+.tab.on{background:var(--yellow);border-color:var(--line);color:var(--ink)}
+
+.grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:10px;
+  overflow:auto;padding:2px;align-items:start;align-content:start;
+}
+.card{
+  position:relative;overflow:hidden;cursor:pointer;
+  padding-top:130%;                /* 300 x 390 的比例，保证完整卡面 */
+  border:1px solid var(--line-2);background:#fff;transition:.1s linear;
+  align-self:start;
+}
+.card:hover{border-color:var(--line);box-shadow:0 0 0 2px var(--yellow)}
+.card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.card .t{
+  position:absolute;left:0;right:0;bottom:0;padding:4px 6px;font-size:11px;color:#fff;
+  font-weight:600;background:linear-gradient(0deg,rgba(0,0,0,.85),rgba(0,0,0,0));
+}
+.card .e{
+  position:absolute;top:0;right:0;padding:3px 5px;
+  font:800 9px/1 Consolas,monospace;background:var(--ink);color:var(--yellow);
+}
+
+textarea{
+  width:100%;min-height:150px;resize:vertical;padding:12px;
+  background:#fffdf2;border:1px solid var(--line-2);color:var(--ink);
+  font:12px/1.6 Consolas,monospace;outline:none;border-radius:0;
+}
+textarea:focus{border-color:var(--line);box-shadow:inset 0 0 0 2px var(--yellow)}
+.modal-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;bottom:-16px;z-index:3;background:var(--panel);
+  margin:12px -16px -16px;padding:10px 16px 16px;border-top:1px solid var(--line-2);
+}
+
+.caret-line{
+  position:absolute;width:2px;background:var(--ink);display:none;
+  pointer-events:none;transition:left .06s linear,top .06s linear;
+}
+.caret-line:after{
+  content:"";position:absolute;inset:0;background:var(--yellow);opacity:.9;
+}
+.icon-empty{width:52px;height:52px;border:1px dashed #bfb49a;background:#fffdf2}
+
+.toast{
+  position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(14px);
+  z-index:99;opacity:0;pointer-events:none;transition:.14s linear;
+  padding:9px 16px;font:800 12px/1 "Microsoft YaHei UI";letter-spacing:1px;
+  background:var(--ink);border:1px solid var(--ink);color:var(--yellow);
+  box-shadow:4px 4px 0 rgba(20,19,17,.18);
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+.set-row label{font-size:12px;color:var(--ink-2);font-weight:600;flex:1 1 auto;min-width:0;line-height:1.5}
+.set-row > input{
+  width:120px;padding:7px 10px;background:#fffdf2;border:1px solid var(--line-2);
+  color:var(--ink);font:12px Consolas,monospace;font-weight:700;outline:none;border-radius:0;
+}
+.set-row input:focus{border-color:var(--line);box-shadow:inset 0 0 0 2px var(--yellow)}
+
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:#efe9d8}
+::-webkit-scrollbar-thumb{background:#c9c0a8;border:2px solid #efe9d8}
+::-webkit-scrollbar-thumb:hover{background:var(--yellow-2)}
+
+/* 拖动时禁止选中/原生拖拽 */
+body.dragging-seq{cursor:grabbing}
+body.dragging-seq *{cursor:grabbing !important}
+img{-webkit-user-drag:none}
+/* 拖动虚影：跟着鼠标走 */
+/* 仿浏览器原生拖影：半透明、原尺寸 */
+.drag-ghost{
+  position:fixed;z-index:999;pointer-events:none;
+  margin:0;
+  opacity:.62;
+  background:transparent !important;border-color:transparent !important;
+}
+.drag-ghost .n{opacity:.6}
+.cell.src-dragging{opacity:.28}
+/* 拖动时的插入线 */
+
+/* 让拖拽只由格子本身发起：内部图片/文字不吃鼠标事件，避免浏览器把拖动
+   当成“拖选文字”，从而弹出“搜索文本” */
+.cell, .cell *{user-select:none; -webkit-user-select:none}
+.cell *{pointer-events:none}
+.cell img{-webkit-user-drag:none}
+.seq-wrap, .seq{user-select:none; -webkit-user-select:none}
+/* B站按钮：头像 + 名字 */
+.bili-btn{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px}
+.bili-ava{
+  width:24px;height:24px;object-fit:cover;display:block;
+  border:1px solid var(--line);background:#fff;
+}
+.bili-btn span{font-size:12px;font-weight:700;letter-spacing:.5px}
+/* 键位设置 */
+.set-sub{margin:10px 0 4px;font-size:12px;font-weight:700;letter-spacing:1px;color:#8a6d00;
+  border-bottom:1px dashed var(--line);padding-bottom:4px}
+.key-group{display:flex;gap:6px}
+.keyin{
+  width:52px;text-align:center;font-family:inherit;font-size:13px;font-weight:700;
+  border:1px solid var(--line);background:#fff;color:var(--ink);padding:4px 2px;cursor:pointer;
+}
+.keyin:focus{outline:2px solid var(--yellow);outline-offset:-2px;background:#fffbdd}
+.keyin::placeholder{color:#b9b4a2;font-weight:400}
+.hint{font-size:11px;color:#8d8878;font-weight:400;line-height:1.4}
+/* 键位行：标签占一行、四个键位排在右边 */
+.set-row .key-group{display:flex;gap:6px;flex:0 0 auto}
+.set-row .keyin{width:44px;flex:0 0 auto}
+.modal-card .set-row{align-items:center}
+/* 弹窗滚动条（小窗口下） */
+.modal-card::-webkit-scrollbar{width:10px}
+.modal-card::-webkit-scrollbar-track{background:#efe9d8}
+.modal-card::-webkit-scrollbar-thumb{background:var(--ink);border:2px solid #efe9d8}
+/* 输入模式切换 */
+.mode-group{display:flex;gap:8px;flex:0 0 auto}
+.mode-opt{
+  display:flex;align-items:center;gap:6px;padding:5px 12px;
+  border:1px solid var(--line);background:#fffdf2;cursor:pointer;
+  font-size:12px;font-weight:700;color:var(--ink-2);
+}
+.mode-opt:has(input:checked){background:var(--yellow);border-color:var(--line);color:var(--ink)}
+.mode-opt input{accent-color:#1b1a17;margin:0}
+
+/* 手柄键位输入 */
+$115px;font-weight:700;
+  border:1px solid var(--line);background:#fff;color:var(--ink);
+  padding:5px 6px;cursor:pointer;
+}
+.set-row .padin{
+  width:74px;height:30px;flex:0 0 auto;text-align:center;
+  font-family:inherit;font-size:14px;font-weight:700;color:var(--ink);
+  border:1px solid var(--line);background:#fff;padding:0 4px;cursor:pointer;
+  box-sizing:border-box;
+}
+.set-row .padin.padslot{width:74px;font-size:16px}
+.set-row .padin.learning{
+  background:#fff3b0;border-color:var(--yellow-2);
+  animation:blink 0.8s linear infinite;
+}
+@keyframes blink{50%{background:#ffe680}}
+
+/* 一行放不下时：标签在上，输入在下 */
+.set-row.stack{display:block}
+.set-row.stack > label{display:block;margin-bottom:6px}
+.set-row.stack .key-group{justify-content:flex-start}
+
+/* 卡面缺失时的占位（显示干员名，不留破图标） */
+.card-missing{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:repeating-linear-gradient(45deg,#f4f0e4,#f4f0e4 8px,#ece6d4 8px,#ece6d4 16px);
+  color:#8d8878;font-size:13px;font-weight:700;letter-spacing:1px;
+  padding:8px;text-align:center;word-break:break-all;
+}
+/* 重击：无按键，仅提示 */
+.cell.heavy .n{color:#8d8878}
+.cell.heavy.sel{outline:2px solid var(--yellow);outline-offset:-2px}
+/* 手柄面键：统一大小的图形（SVG），避免 □△○× 字面大小不一 */
+.padslot.filled{color:transparent;text-shadow:none;caret-color:transparent}
+.padslot[data-sym]{background-repeat:no-repeat;background-position:center;background-size:18px 18px}
+.padslot[data-sym="sq"]{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='5' y='5' width='14' height='14' fill='none' stroke='%231a1f29' stroke-width='2'/></svg>")}
+.padslot[data-sym="tri"]{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 4 L21 20 H3 Z' fill='none' stroke='%231a1f29' stroke-width='2' stroke-linejoin='round'/></svg>")}
+.padslot[data-sym="cir"]{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='none' stroke='%231a1f29' stroke-width='2'/></svg>")}
+.padslot[data-sym="cro"]{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 6 L18 18 M18 6 L6 18' stroke='%231a1f29' stroke-width='2.4' stroke-linecap='round'/></svg>")}
+
+/* 修饰键 / 连携键下拉 */
+.padsel{
+  height:30px;min-width:150px;border:1px solid var(--line);background:#fff;
+  color:var(--ink);font-family:inherit;font-size:13px;font-weight:700;padding:0 6px;
+}
+.padsel:focus{outline:2px solid var(--yellow);outline-offset:-2px}
+
+.mini{white-space:nowrap}
+
+
+/* 添加按钮 + 下面的快捷键说明 */
+.adder-col{display:flex;flex-direction:column;align-items:center;gap:2px}
+.adder-key{
+  font:700 10px/1 Consolas,"Microsoft YaHei UI";color:#9a927c;
+  background:#f5efd6;border:1px solid #e6dcc0;padding:1px 4px;white-space:nowrap;
+}
+.adder-col:hover .adder-key{background:var(--yellow);color:#3b3a33}
+
+
+/* 添加技能的标签列：上面标签，下面修饰键 */
+.adder-prefix{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:56px}
+.adder-mod{
+  font:700 11px/1 Consolas,"Microsoft YaHei UI";color:#8a7f63;
+  background:#f5efd6;border:1px solid #e6dcc0;padding:2px 6px;min-width:18px;text-align:center;
+}
+.adder-plus{
+  align-self:flex-end;margin:0 2px 14px;font:700 14px/1 Consolas;
+  color:#8a7f63;
+}
+
+
+/* 主界面右下角：退出程序 */
+.tools{flex:1 1 auto;flex-wrap:nowrap}
+.quit-inline{margin-left:auto}
+
+
+/* 给右下角退出按钮留出空间，避免压住工具栏 */
+
+
+/* ============ 运行条透明度：技能轴标题行右侧 ============ */
+.head-right{display:flex;align-items:center;gap:10px;flex:0 1 auto;min-width:0;align-self:center}
+.alpha-ctl{
+  display:flex;align-items:center;gap:8px;padding:3px 8px;
+  background:#fffdf6;border:1px solid var(--line-2);
+}
+.alpha-ctl .alpha-lab{
+  font:800 9px/1 "Microsoft YaHei UI";letter-spacing:1px;color:var(--ink-3);white-space:nowrap;
+}
+.alpha-val{
+  font:800 11px/1 Consolas,monospace;color:var(--ink);
+  min-width:32px;text-align:right;letter-spacing:0;
+}
+
+/* 滑块：直角、黄块，跟整体工业风一致 */
+input[type=range]{
+  -webkit-appearance:none;appearance:none;
+  width:78px;height:14px;padding:0;margin:0;background:transparent;
+  border:none;outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{
+  height:4px;background:#e2dac6;border:1px solid var(--line-2);
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:10px;height:16px;margin-top:-7px;background:var(--yellow);
+  border:1px solid var(--line);border-radius:0;
+  transition:background .1s linear;
+}
+input[type=range]:hover::-webkit-slider-thumb{background:var(--yellow-2)}
+input[type=range]:focus{box-shadow:none}
+input[type=range]::-moz-range-track{height:4px;background:#e2dac6;border:1px solid var(--line-2)}
+input[type=range]::-moz-range-thumb{
+  width:10px;height:16px;background:var(--yellow);border:1px solid var(--line);border-radius:0;
+}
+
+/* 窄窗口：先把标签收掉，别把「开始运行」挤出去 */
+@media (max-width:1180px){
+  .alpha-ctl .alpha-lab{display:none}
+  .alpha-ctl{padding:3px 6px;gap:6px}
+  input[type=range]{width:64px}
+}
+
+/* ============ 反复记号（乐谱式，可嵌套） ============ */
+/* --rc 是这一层的颜色，--ind 是缩进（嵌套越深越往右） */
+.rep{
+  display:flex;align-items:center;gap:7px;flex-basis:100%;height:24px;margin:2px 0;
+  padding:0 6px 0 calc(8px + var(--ind, 0px));
+  cursor:pointer;user-select:none;
+  border-left:4px solid var(--rc, #c9a227);
+  background:#fffdf2;
+  border-top:1px dashed #e6d8a8;border-bottom:1px dashed #e6d8a8;
+  transition:background .1s linear,border-color .1s linear;
+}
+.rep:hover{background:#fffadc}
+.rep.on{background:#fffbe6}
+.rep.off{border-left-color:#c3bbae;background:#fbf9f3}
+.rep.end{background:#fffdf6;border-bottom-style:solid}
+.rep.sel{background:var(--yellow-soft);border-top-color:var(--line);border-bottom-color:var(--line)}
+.rep.pend{outline:2px dashed #e0a800;outline-offset:-3px}
+.rep-tag{
+  font:800 10px/1 "Microsoft YaHei UI";letter-spacing:.5px;
+  color:var(--rc, #8a6d1b);white-space:nowrap;flex:0 0 auto;
+}
+.rep.off .rep-tag{color:#a49a86}
+.rep.end .rep-tag{color:var(--rc, #8a6d1b)}
+.rep-times{display:flex;align-items:center;gap:1px;flex:0 0 auto}
+.rep-times b{
+  font:800 11px/1 "Microsoft YaHei UI";color:var(--rc, #8a6d1b);background:#fff;
+  border:1px solid #e0cf8a;padding:1px 5px;cursor:pointer;
+}
+.rep-times b:hover{background:var(--yellow)}
+.rep-times i{
+  font:800 11px/1 Consolas,monospace;font-style:normal;color:var(--ink);
+  min-width:28px;text-align:center;
+}
+.rep-span{
+  font:600 9px/1 "Microsoft YaHei UI";color:#a99a72;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.rep-quick{
+  font:800 9px/1 "Microsoft YaHei UI";color:#8a6d1b;background:#fff;
+  border:1px solid #e0cf8a;padding:2px 5px;cursor:pointer;flex:0 0 auto;
+}
+.rep-quick:hover{background:var(--yellow)}
+.rep-x{
+  margin-left:auto;font:800 13px/1 "Microsoft YaHei UI";color:#c0b69c;padding:0 4px;
+  flex:0 0 auto;
+}
+.rep-x:hover{color:var(--danger)}
+
+/* 鼠标停在反复记号上：把圈住的整段一起点亮，一眼看清范围 */
+.rep-hi{
+  background:rgba(201,162,39,.16) !important;
+  box-shadow:inset 0 0 0 1px rgba(201,162,39,.45);
+}
+
+/* 一个反复带多个终点时，起点行显示「N 个终点」 */
+.rep-pill{
+  font:800 9px/1 "Microsoft YaHei UI";letter-spacing:.5px;
+  color:#6b5c1e;background:var(--yellow);border:1px solid #e0cf8a;
+  padding:2px 5px;white-space:nowrap;flex:0 0 auto;
+}
+
+
+/* ===== 响应式：窗口缩小不截断 ===== */
+*{min-width:0}
+.panel{min-width:0;overflow:hidden}
+.seq-wrap{overflow-x:auto;overflow-y:auto}
+.actions{flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.topbar{height:auto;min-height:58px;flex-wrap:wrap;gap:8px;padding:6px 14px}
+.topbar .brand{flex:0 0 auto}
+.adder{row-gap:8px}
+.adder .tools{flex-wrap:wrap}
+button{white-space:nowrap}
+.bili-btn{max-width:180px}
+.bili-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 1200 以下：左侧收窄，顶部按钮变小 */
+@media (max-width:1200px){
+  main{grid-template-columns:clamp(240px,24vw,300px) minmax(0,1fr);gap:10px;padding:10px}
+  .actions button{padding:6px 10px;font-size:12px}
+  .brand b{font-size:13px}
+}
+
+/* 1000 以下：改成上下布局，左边变一条横栏 */
+@media (max-width:1000px){
+  /* 窄窗口改成整页滚动，别把内容挤没了 */
+  body{overflow-y:auto}
+  main{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;
+       height:auto;min-height:calc(100% - 58px);align-items:start}
+  .panel.left{max-height:none;overflow:visible}
+  .panel.right{min-height:70vh}
+  .slots{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .slot{height:104px}
+  .seq-wrap{max-height:none}
+}
+
+/* 760 以下：按钮进一步压缩 */
+@media (max-width:760px){
+  .actions{gap:4px}
+  .actions button{padding:5px 8px;font-size:11px}
+  .brand b{display:none}
+  .slots{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quit-inline{margin-left:0}
+}
+
+
+/* 拖动换位置 */
+.slot{cursor:grab}
+.slot:active{cursor:grabbing}
+.slot.drag-over{outline:3px dashed var(--yellow-2);outline-offset:-3px;background:#fffbea}
+/* 反复次数里的「无限」：×∞ 和 ∞ 按钮 */
+.rep-times i.inf{
+  color:#b3261e;min-width:30px;
+}
+.rep-inf{
+  font:800 12px/1 "Microsoft YaHei UI";color:#8a6d1b;background:#fff;
+  border:1px solid #e0cf8a;padding:1px 4px;cursor:pointer;
+}
+.rep-inf:hover{background:var(--yellow)}
+.rep-inf.on{
+  color:#fff;background:#b3261e;border-color:#8f1f14;
+}
+.rep-inf.on:hover{background:#d13a2c}
+
+/* 导入预览：直接用主界面的 .seq 结构，只是加个框和滚动 */
+.seq.preview{
+  max-height:40vh;overflow:auto;padding:10px;
+  background:#fffdf6;border:1px solid var(--line-2);border-radius:10px;
+}
+.seq.preview .cell{cursor:default}
+.seq.preview .cell:hover{background:transparent;border-color:transparent}
+.seq.preview .rep{cursor:default}
+
+/* 轴库搜索框 */
+.lib-search{padding:0 0 8px}
+.lib-search input{
+  width:100%;box-sizing:border-box;padding:5px 9px;
+  font:12px/1.5 'Microsoft YaHei UI';color:var(--ink);
+  border:1px solid var(--line-2);border-radius:8px;background:#fffdf6;
+}
+.lib-search input:focus{outline:none;border-color:var(--yellow-2);background:#fff}
+
+/* ===== 设置：左侧导航 + 右侧分页 ===== */
+.set-card{
+  width:min(920px,94vw)!important;
+  height:min(80vh,720px);max-height:none!important;
+  overflow:hidden!important;display:flex;flex-direction:column;
+}
+.set-wrap{flex:1 1 auto;display:flex;gap:0;min-height:0;margin:0 -4px}
+.set-nav{
+  flex:0 0 132px;display:flex;flex-direction:column;gap:6px;
+  padding:2px 12px 2px 0;border-right:1px dashed var(--line-2);overflow-y:auto;
+}
+.set-nav button{
+  text-align:left;font:700 12px/1.3 'Microsoft YaHei UI';letter-spacing:.5px;
+  color:var(--ink-2);background:#fff;border:1px solid var(--line-2);
+  padding:8px 10px;cursor:pointer;transition:background .08s,color .08s;
+}
+.set-nav button:hover{background:var(--yellow-soft);border-color:var(--line)}
+.set-nav button.on{
+  background:var(--yellow);border-color:var(--line);color:var(--ink);
+  box-shadow:2px 2px 0 rgba(20,19,17,.12);
+}
+.set-nav button.on:before{content:"▸ ";color:var(--line)}
+.set-panes{flex:1 1 auto;min-width:0;overflow-y:auto;padding:0 4px 8px 16px;overscroll-behavior:contain}
+.set-pane[hidden]{display:none}
+.pane-title{
+  font:800 13px/1.4 'Microsoft YaHei UI';letter-spacing:2px;color:var(--ink);
+  margin:0 0 10px;padding:0 0 6px;border-bottom:2px solid var(--line);
+}
+.pane-title:before{content:"// ";color:var(--yellow-2)}
+.set-pane .set-sub{margin:16px 0 6px}
+.set-pane .set-row:first-of-type{margin-top:6px}
+.set-panes::-webkit-scrollbar{width:10px}
+.set-panes::-webkit-scrollbar-track{background:#efe9d8}
+.set-panes::-webkit-scrollbar-thumb{background:var(--ink);border:2px solid #efe9d8}
+
+@media (max-width:640px){
+  .set-card{height:min(86vh,760px)}
+  .set-wrap{flex-direction:column}
+  .set-nav{
+    flex:0 0 auto;flex-direction:row;gap:6px;overflow-x:auto;
+    border-right:none;border-bottom:1px dashed var(--line-2);
+    padding:0 0 8px;margin-bottom:8px;
+  }
+  .set-nav button{white-space:nowrap;padding:6px 9px}
+  .set-panes{padding:0 2px 8px}
+}

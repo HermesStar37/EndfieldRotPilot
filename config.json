@@ -1,0 +1,63 @@
+{
+  "keys": {
+    "skill": [
+      "1",
+      "2",
+      "3",
+      "4"
+    ],
+    "ult": [
+      "",
+      "",
+      "",
+      ""
+    ],
+    "link": "E",
+    "exit": "F8",
+    "reset": "F9",
+    "alphaDown": "F6",
+    "alphaUp": "F7",
+    "loopToggle": "F10",
+    "loopJump": "F11"
+  },
+  "inputMode": "kb",
+  "overlayStyle": "focus",
+  "loopCount": 0,
+  "loopFrom": 0,
+  "loopTo": 0,
+  "displayMode": "kb",
+  "comps": [],
+  "padType": "ds",
+  "pad": {
+    "modifier": "winmm:B5",
+    "slots": [
+      "winmm:B1",
+      "winmm:B4",
+      "winmm:B3",
+      "winmm:B2"
+    ],
+    "link": "winmm:B6",
+    "exit": "",
+    "reset": ""
+  },
+  "holdMs": 280,
+  "opacity": 0.94,
+  "uiScale": 1,
+  "nextPreview": 0,
+  "autoExit": 1,
+  "demoSeeded": 1,
+  "steps": [],
+  "team": [
+    "",
+    "",
+    "",
+    ""
+  ],
+  "teams": [],
+  "freshInit": true,
+  "screenMode": "game",
+  "winMax": false,
+  "overlayMonitor": "",
+  "winRect": null,
+  "winMonitor": ""
+}
