@@ -273,16 +273,32 @@ def update_apply():
         'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
     ]
+    run_dir = new_base
     if new_base != base and move_src:
         move_target = new_base if move_src == base else os.path.dirname(new_base)
         L += [
-            'if exist "' + move_target + '" goto skipmove',
+            'set "RUN=' + new_base + '"',
+            'set "TRIES=0"',
+            ":trymove",
+            'if exist "' + move_target + '" goto moved',
             'move "' + move_src + '" "' + move_target + '" >> "%LOG%" 2>&1',
             'echo move rc=%errorlevel% >> "%LOG%"',
-            ":skipmove",
+            'if exist "' + new_base + '\\app_web.py" goto moved',
+            'set /a TRIES+=1',
+            'if %TRIES% GEQ 5 goto movestuck',
+            "timeout /t 1 /nobreak >nul",
+            "goto trymove",
+            ":movestuck",
+            'echo move failed, keep old folder >> "%LOG%"',
+            'set "RUN=' + base + '"',
+            ":moved",
         ]
+    else:
+        L += ['set "RUN=' + run_dir + '"']
     L += [
-        'start "" "' + new_base + '\\runtime\\pythonw.exe" "' + new_base + '\\app_web.py"',
+        'if not exist "%RUN%\\app_web.py" set "RUN=' + base + '"',
+        'echo run=%RUN% >> "%LOG%"',
+        'start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py"',
         'echo start rc=%errorlevel% >> "%LOG%"',
         'del "%~f0"',
     ]
