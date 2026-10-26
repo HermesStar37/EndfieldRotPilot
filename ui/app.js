@@ -2836,10 +2836,6 @@ function panMenu() {
     if (!disabled) b.onclick = () => { box.remove(); fn(); };
     box.appendChild(b);
   };
-  mk("网盘下载", LINKS.pan ? "新版本 / 新干员（网盘）" : "网盘地址还没填", () => {
-    if (!LINKS.pan) return toast("网盘地址还没填");
-    window.open(LINKS.pan, "_blank");
-  }, !LINKS.pan);
   mk("GitHub 更新", "检查新版本并一键更新", checkUpdate);
   mk("更新干员", "从 GitHub 拉最新干员包", checkOpsPack);
   document.body.appendChild(box);
