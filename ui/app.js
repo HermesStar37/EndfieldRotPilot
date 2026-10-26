@@ -2978,8 +2978,21 @@ async function startUpdate(url, size) {
       b.className = "mini";
       b.textContent = "立即更新";
       b.onclick = async () => {
-        try { await api.post("/api/update/apply", {}); } catch (e) {}
-        toast("正在更新，程序会自动重启");
+        b.disabled = true;
+        b.textContent = "正在更新…";
+        try {
+          const r = await api.post("/api/update/apply", {});
+          if (!r || !r.ok) {
+            const msg = (r && r.error) || "未知错误";
+            openUpdPanel("更新没启动", "原因：" + msg +
+              "\n\n可以把下面这个文件手动解压覆盖：\n" +
+              "%TEMP%\\rotpilot_update\\update.zip", []);
+            return;
+          }
+          toast("正在更新，程序会自动重启");
+        } catch (e) {
+          openUpdPanel("更新失败", String(e), []);
+        }
       };
       btns.appendChild(b);
     }

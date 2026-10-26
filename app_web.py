@@ -36,8 +36,11 @@ _UPDATE = {"state": "idle", "received": 0, "total": 0, "path": "", "error": ""}
 
 
 def _ver_tuple(v):
-    nums = re.findall(r"\d+", str(v or ""))
-    return tuple(int(x) for x in nums[:3]) or (0,)
+    """把 v1.4 / v1.4.1 / v1.4.1.2 统一成三位元组，缺的补 0。"""
+    nums = [int(x) for x in re.findall(r"\d+", str(v or ""))[:3]]
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
 
 
 def _update_get(url, timeout=15):
@@ -49,55 +52,53 @@ def _update_get(url, timeout=15):
 
 
 def update_check():
-    """读 GitHub 最新 release，和本地版本比。"""
+    """读 GitHub 的 Release，挑出「版本号型」的最新一个，和本地比。"""
+    base = UPDATE_API.rstrip("/")
+    data = None
     try:
-        data = _update_get("%s/repos/%s/releases/latest" % (UPDATE_API.rstrip("/"), UPDATE_REPO))
+        # 先拿列表：里面可能有「新干员」这种非版本号 tag，要跳过
+        items = _update_get("%s/repos/%s/releases?per_page=30" % (base, UPDATE_REPO))
+        best = None
+        best_tuple = ()
+        for it in items if isinstance(items, list) else []:
+            tag = str(it.get("tag_name") or "")
+            if not re.search(r"\d", tag):
+                continue
+            vt = _ver_tuple(tag)
+            if best is None or vt > best_tuple:
+                best, best_tuple = it, vt
+        if best is None:
+            data = _update_get("%s/repos/%s/releases/latest" % (base, UPDATE_REPO))
+        else:
+            data = best
     except Exception as e:
-        return {"ok": False, "error": "连不上 GitHub：%s" % e, "current": APP_VERSION}
+        try:
+            data = _update_get("%s/repos/%s/releases/latest" % (base, UPDATE_REPO))
+        except Exception as e2:
+            return {"ok": False, "error": "连不上 GitHub：%s" % e2, "current": APP_VERSION}
+
     latest = str(data.get("tag_name") or "").strip()
     assets = data.get("assets") or []
     url = ""
     size = 0
     for a in assets:
         n = str(a.get("name") or "")
-        if n.lower().endswith(".zip"):
+        if n.lower().endswith(".zip") and not n.lower().startswith("operators"):
             url = a.get("browser_download_url") or ""
             size = int(a.get("size") or 0)
             break
+    if not url:
+        for a in assets:
+            if str(a.get("name") or "").lower().endswith(".zip"):
+                url = a.get("browser_download_url") or ""
+                size = int(a.get("size") or 0)
+                break
     if UPDATE_MIRROR and url:
         url = UPDATE_MIRROR.rstrip("/") + "/" + url
     return {"ok": True, "current": APP_VERSION, "latest": latest or APP_VERSION,
             "newer": bool(latest) and _ver_tuple(latest) > _ver_tuple(APP_VERSION),
             "notes": (data.get("body") or "")[:6000], "url": url, "size": size,
             "page": data.get("html_url") or ""}
-
-
-def update_download(url):
-    """后台下载更新包，进度写进 _UPDATE。"""
-    import urllib.request
-    _UPDATE.update({"state": "downloading", "received": 0, "total": 0, "path": "", "error": ""})
-    os.makedirs(UPDATE_DIR, exist_ok=True)
-    path = os.path.join(UPDATE_DIR, "update.zip")
-
-    def run():
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
-            with urllib.request.urlopen(req, timeout=30) as r, open(path, "wb") as f:
-                total = int(r.headers.get("Content-Length") or 0)
-                _UPDATE["total"] = total
-                while True:
-                    chunk = r.read(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    _UPDATE["received"] += len(chunk)
-            _UPDATE.update({"state": "done", "path": path})
-            log("update downloaded: %s" % path)
-        except Exception as e:
-            _UPDATE.update({"state": "error", "error": str(e)})
-            log("update download fail: %s" % e)
-
-    threading.Thread(target=run, daemon=True).start()
 
 
 def import_operators_pack(data, filename=""):
@@ -166,8 +167,15 @@ def update_ops_check():
 def update_apply():
     """写一个 bat：退出后解压覆盖并重启（保留 config.json）。"""
     zip_path = _UPDATE.get("path") or ""
+    # 兜底：程序中途重启过，内存里的路径没了，但临时目录里的包还在
     if not zip_path or not os.path.exists(zip_path):
-        return False, "还没有下载好的更新包"
+        cand = os.path.join(UPDATE_DIR, "update.zip")
+        if os.path.exists(cand) and os.path.getsize(cand) > 1024:
+            zip_path = cand
+            log("update apply: use cached zip %s" % cand)
+    if not zip_path or not os.path.exists(zip_path):
+        log("update apply: no zip (path=%r)" % zip_path)
+        return False, "还没有下载好的更新包（临时文件已被清理，请重新下载）"
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
     inner = os.path.join(dst, "EndfieldRotPilot")
