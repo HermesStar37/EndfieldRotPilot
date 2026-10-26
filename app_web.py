@@ -164,38 +164,81 @@ def update_ops_check():
             "published": asset.get("updated_at") or "",
             "installed": local, "newer": bool(local) is False or local != asset.get("name")}
 
+def update_download(url):
+    """后台下载更新包，进度写进 _UPDATE。"""
+    import urllib.request
+    _UPDATE.update({"state": "downloading", "received": 0, "total": 0, "path": "", "error": ""})
+    os.makedirs(UPDATE_DIR, exist_ok=True)
+    path = os.path.join(UPDATE_DIR, "update.zip")
+    log("update download: dir=%s url=%s" % (UPDATE_DIR, url[:120]))
+
+    def run():
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
+            with urllib.request.urlopen(req, timeout=30) as r, open(path, "wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                _UPDATE["total"] = total
+                while True:
+                    chunk = r.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    _UPDATE["received"] += len(chunk)
+            size = os.path.getsize(path) if os.path.exists(path) else 0
+            log("update download done: %s (%d bytes)" % (path, size))
+            if size < 1024:
+                _UPDATE.update({"state": "error", "error": "下到的文件只有 %d 字节" % size})
+                return
+            _UPDATE.update({"state": "done", "path": path})
+        except Exception as e:
+            _UPDATE.update({"state": "error", "error": str(e)})
+            log("update download fail: %s" % e)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def update_apply():
-    """写一个 bat：退出后解压覆盖并重启（保留 config.json）。"""
+    """写一个 bat：退出后解压覆盖并重启（隐藏窗口，保留 config.json）。"""
     zip_path = _UPDATE.get("path") or ""
-    # 兜底：程序中途重启过，内存里的路径没了，但临时目录里的包还在
     if not zip_path or not os.path.exists(zip_path):
         cand = os.path.join(UPDATE_DIR, "update.zip")
         if os.path.exists(cand) and os.path.getsize(cand) > 1024:
             zip_path = cand
-            log("update apply: use cached zip %s" % cand)
     if not zip_path or not os.path.exists(zip_path):
-        log("update apply: no zip (path=%r)" % zip_path)
-        return False, "还没有下载好的更新包（临时文件已被清理，请重新下载）"
+        log("update apply: no zip")
+        return False, "没有找到更新包：%s" % os.path.join(UPDATE_DIR, "update.zip")
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
+    logf = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.log")
     inner = os.path.join(dst, "EndfieldRotPilot")
     exe = os.path.join(BASE, "启动.bat")
-    ps_cmd = "Expand-Archive -LiteralPath '" + zip_path + "' -DestinationPath '" + dst + "' -Force"
-    lines = [
+    pyw = os.path.join(BASE, "runtime", "pythonw.exe")
+    launcher = (pyw if os.path.exists(pyw) else os.path.join(BASE, "runtime", "python.exe")) + '" "' + os.path.join(BASE, "app_web.py")
+    cfg = os.path.join(BASE, "config.json")
+    cfgbak = os.path.join(BASE, "config.json.bak")
+    L = [
         "@echo off",
         "chcp 65001 >nul",
+        'set LOG=%TEMP%\\rotpilot_update.log',
+        'echo ==== start %date% %time% ==== >> "%LOG%"',
         "timeout /t 2 /nobreak >nul",
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
-        'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps_cmd + '"',
-        'copy /y "' + os.path.join(BASE, "config.json") + '" "' + os.path.join(BASE, "config.json.bak") + '" >nul 2>nul',
-        'robocopy "' + inner + '" "' + BASE + '" /E /XF config.json /NFL /NDL /NJH /NJS',
-        'start "" "' + exe + '"',
+        'mkdir "' + dst + '"',
+        'tar -xf "' + zip_path + '" -C "' + dst + '" >> "%LOG%" 2>&1',
+        'echo extract rc=%errorlevel% >> "%LOG%"',
+        'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
+        'robocopy "' + inner + '" "' + BASE + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
+        'echo copy rc=%errorlevel% >> "%LOG%"',
+        'start "" "' + launcher + '"',
+        'echo start rc=%errorlevel% >> "%LOG%"',
         'del "%~f0"',
     ]
-    with open(bat, "w", encoding="gbk", errors="replace", newline="") as f:
-        f.write("\r\n".join(lines) + "\r\n")
+    # bat 里带中文路径（启动.bat），必须用 UTF-8 写，配合 chcp 65001
+    with open(bat, "w", encoding="utf-8", newline="") as f:
+        f.write("\r\n".join(L) + "\r\n")
+    log("update apply: bat=%s zip=%s" % (bat, zip_path))
     import subprocess
-    subprocess.Popen(["cmd", "/c", bat], cwd=BASE, creationflags=0x00000008 | 0x00000200)
+    subprocess.Popen(["cmd", "/c", bat], cwd=BASE, creationflags=0x08000000)
     return True, bat
 # 版本信息（设置里「关于」显示用）
 APP_VERSION = "v1.4"
@@ -2775,7 +2818,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, update_check())
 
         if p == "/api/update/progress":
-            return self._send(200, _UPDATE)
+            path = _UPDATE.get("path") or ""
+            exists = bool(path) and os.path.exists(path)
+            out = dict(_UPDATE)
+            out["exists"] = exists
+            out["size"] = os.path.getsize(path) if exists else 0
+            return self._send(200, out)
 
         if p == "/api/pad_debug":
             raw_pad()

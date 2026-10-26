@@ -237,6 +237,8 @@ function toast(msg, ms) {
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+let updatingNow = false;   // 更新时后台会退出，别弹「进程没有响应」
+
 const LINKS = {
   bili: "https://space.bilibili.com/495412309",
   biliName: "若枫鹿栀",
@@ -507,7 +509,7 @@ function apiFail() {
   _apiFails += 1;
   // 重试之后还失败，连续 3 次才提示（避免保存时闪一下红条）
   if (_apiFails >= 3) {
-    showErr("后台进程没有响应。处理：关掉黑色命令行窗口，重新双击 启动.bat。");
+    if (!updatingNow) showErr("后台进程没有响应。处理：关掉黑色命令行窗口，重新双击 启动.bat。");
   }
   if (!_apiTimer) {
     _apiTimer = setInterval(async () => {
@@ -2804,7 +2806,7 @@ function openDocs() {
   if (!LINKS.docs) return toast("还没填共享文档地址");
   window.open(LINKS.docs, "_blank");
 }
-$("#btnDocs").onclick = openDocs;
+if ($("#btnDocs")) $("#btnDocs").onclick = openDocs;
 
 if ($("#shareDocs")) $("#shareDocs").onclick = openDocs;
 if ($("#importDocs")) $("#importDocs").onclick = openDocs;
@@ -2978,8 +2980,15 @@ async function startUpdate(url, size) {
       if (txt) txt.textContent = "下载失败：" + (p.error || "未知错误");
       return;
     }
+    if (!p.exists) {
+      if (txt) txt.textContent = "下载失败：文件没落盘\n路径：" + (p.path || "（未知）") +
+        "\n大小：" + (p.size || 0) + " 字节";
+      return;
+    }
     if (bar) bar.style.width = "100%";
-    if (txt) txt.textContent = "下载完成。\n\n点「立即更新」后程序会关闭，解压覆盖并自动重启。\nconfig.json 会保留。";
+    if (txt) txt.textContent = "下载完成（" + (p.size / 1048576).toFixed(1) + " MB）。\n\n" +
+      "点「立即更新」后程序会关闭，解压覆盖并自动重启。\nconfig.json 会保留。\n\n" +
+      "保存位置：" + p.path;
     const btns = document.getElementById("updBtns");
     if (btns) {
       btns.innerHTML = "";
@@ -2990,6 +2999,7 @@ async function startUpdate(url, size) {
         b.disabled = true;
         b.textContent = "正在更新…";
         try {
+          updatingNow = true;
           const r = await api.post("/api/update/apply", {});
           if (!r || !r.ok) {
             const msg = (r && r.error) || "未知错误";
