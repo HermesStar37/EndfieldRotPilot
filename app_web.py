@@ -393,7 +393,30 @@ def update_apply():
         'set LOG=%TEMP%\\rotpilot_update.log',
         'cd /d "%TEMP%"',
         'echo ==== start %date% %time% ==== >> "%LOG%"',
-        "timeout /t 3 /nobreak >nul",
+        "timeout /t 4 /nobreak >nul",
+        # 先备份配置（此时旧路径还在）
+        'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
+        'set "RUN=' + run + '"',
+    ]
+    if new_base != base and move_src:
+        move_target = new_base if move_src == base else os.path.dirname(new_base)
+        L += [
+            'set "TRIES=0"',
+            ":trymove",
+            'if exist "' + new_base + '\\app_web.py" goto moved',
+            'move "' + move_src + '" "' + move_target + '" >> "%LOG%" 2>&1',
+            'echo move rc=%errorlevel% >> "%LOG%"',
+            'if exist "' + new_base + '\\app_web.py" goto moved',
+            'set /a TRIES+=1',
+            'if %TRIES% GEQ 6 goto movestuck',
+            "timeout /t 2 /nobreak >nul",
+            "goto trymove",
+            ":movestuck",
+            'echo move failed, keep old folder >> "%LOG%"',
+            'set "RUN=' + base + '"',
+            ":moved",
+        ]
+    L += [
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
         'mkdir "' + dst + '"',
         'tar -xf "' + zip_path + '" -C "' + dst + '" >> "%LOG%" 2>&1',
@@ -403,32 +426,8 @@ def update_apply():
         + zip_path + '\' -DestinationPath \'' + dst + '\' -Force" >> "%LOG%" 2>&1',
         ":extractok",
         'if not exist "' + inner + '\\app_web.py" goto extractfail',
-    ]
-    L += [
-        'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
-        'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
+        'robocopy "' + inner + '" "%RUN%" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
-    ]
-    L += ['set "RUN=' + run + '"']
-    if new_base != base and move_src:
-        move_target = new_base if move_src == base else os.path.dirname(new_base)
-        L += [
-            'set "TRIES=0"',
-            ":trymove",
-            'if exist "' + move_target + '" goto moved',
-            'move "' + move_src + '" "' + move_target + '" >> "%LOG%" 2>&1',
-            'echo move rc=%errorlevel% >> "%LOG%"',
-            'if exist "' + new_base + '\\app_web.py" goto moved',
-            'set /a TRIES+=1',
-            'if %TRIES% GEQ 5 goto movestuck',
-            "timeout /t 1 /nobreak >nul",
-            "goto trymove",
-            ":movestuck",
-            'echo move failed, keep old folder >> "%LOG%"',
-            'set "RUN=' + base + '"',
-            ":moved",
-        ]
-    L += [
         'if not exist "%RUN%\\app_web.py" set "RUN=' + base + '"',
         'echo run=%RUN% >> "%LOG%"',
         'if exist "%RUN%\\runtime\\pythonw.exe" (start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py") '
@@ -437,11 +436,10 @@ def update_apply():
         'goto end',
         ":extractfail",
         'echo extract failed, keep old files >> "%LOG%"',
-        'start "" "' + base + '\\runtime\\pythonw.exe" "' + base + '\\app_web.py"',
+        'start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py"',
         ":end",
         'del "%~f0"',
     ]
-
     with open(bat, "w", encoding="utf-8", newline="") as f:
         f.write("\r\n".join(L) + "\r\n")
 
@@ -3141,7 +3139,9 @@ class Handler(BaseHTTPRequestHandler):
                     "name": n,
                     "element": read_txt(core.op_file(n, "element.txt")),
                     "cls": read_txt(core.op_file(n, "class.txt")),
-                    "card": bool(card_path(n)),
+                    "mtime": int(os.path.getmtime(os.path.join(CORE_DIR, "operators", n)))
+                     if os.path.isdir(os.path.join(CORE_DIR, "operators", n)) else 0,
+            "card": bool(card_path(n)),
                     "avatar": bool(avatar_path(n)),
                     "assets": {
                         "skill": has_asset(n, "skill"),

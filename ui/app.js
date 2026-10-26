@@ -819,6 +819,9 @@ function renderGrid() {
   box.innerHTML = "";
   state.ops
     .filter((o) => !state.pickElem || o.element === state.pickElem)
+    .slice()
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0) ||
+      String(a.name).localeCompare(String(b.name), "zh"))
     .forEach((o) => {
       const c = document.createElement("div");
       c.className = "card";
