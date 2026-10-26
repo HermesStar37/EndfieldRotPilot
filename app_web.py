@@ -383,9 +383,19 @@ def update_apply():
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
     inner = os.path.join(dst, root_name)
+
+    # 最终目录：统一叫 EndfieldRotPilot，且不再套一层版本文件夹
+    base_name = os.path.basename(base)
+    desired = base
+    if base_name == "EndfieldRotPilot":
+        pname = os.path.basename(parent)
+        if re.match(vz, pname):                      # 外面那层带版本号
+            desired = os.path.join(os.path.dirname(parent), "EndfieldRotPilot")
+    elif re.match(vz, base_name):                    # 自己就带版本号
+        desired = os.path.join(parent, "EndfieldRotPilot")
+
     cfg = os.path.join(base, "config.json")
     cfgbak = os.path.join(base, "config.json.bak")
-    run = new_base
 
     L = [
         "@echo off",
@@ -394,29 +404,7 @@ def update_apply():
         'cd /d "%TEMP%"',
         'echo ==== start %date% %time% ==== >> "%LOG%"',
         "timeout /t 4 /nobreak >nul",
-        # 先备份配置（此时旧路径还在）
         'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
-        'set "RUN=' + run + '"',
-    ]
-    if new_base != base and move_src:
-        move_target = new_base if move_src == base else os.path.dirname(new_base)
-        L += [
-            'set "TRIES=0"',
-            ":trymove",
-            'if exist "' + new_base + '\\app_web.py" goto moved',
-            'move "' + move_src + '" "' + move_target + '" >> "%LOG%" 2>&1',
-            'echo move rc=%errorlevel% >> "%LOG%"',
-            'if exist "' + new_base + '\\app_web.py" goto moved',
-            'set /a TRIES+=1',
-            'if %TRIES% GEQ 6 goto movestuck',
-            "timeout /t 2 /nobreak >nul",
-            "goto trymove",
-            ":movestuck",
-            'echo move failed, keep old folder >> "%LOG%"',
-            'set "RUN=' + base + '"',
-            ":moved",
-        ]
-    L += [
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
         'mkdir "' + dst + '"',
         'tar -xf "' + zip_path + '" -C "' + dst + '" >> "%LOG%" 2>&1',
@@ -426,8 +414,20 @@ def update_apply():
         + zip_path + '\' -DestinationPath \'' + dst + '\' -Force" >> "%LOG%" 2>&1',
         ":extractok",
         'if not exist "' + inner + '\\app_web.py" goto extractfail',
-        'robocopy "' + inner + '" "%RUN%" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
+        'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
+        'set "RUN=' + base + '"',
+    ]
+    if desired != base:
+        L += [
+            'set "DEST=' + desired + '"',
+            'if exist "%DEST%\\app_web.py" goto noshift',
+            'robocopy "' + base + '" "%DEST%" /E /XF web_run.log /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
+            'echo shift rc=%errorlevel% >> "%LOG%"',
+            'if exist "%DEST%\\app_web.py" set "RUN=%DEST%"',
+            ":noshift",
+        ]
+    L += [
         'if not exist "%RUN%\\app_web.py" set "RUN=' + base + '"',
         'echo run=%RUN% >> "%LOG%"',
         'if exist "%RUN%\\runtime\\pythonw.exe" (start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py") '
@@ -436,7 +436,7 @@ def update_apply():
         'goto end',
         ":extractfail",
         'echo extract failed, keep old files >> "%LOG%"',
-        'start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py"',
+        'start "" "' + base + '\\runtime\\pythonw.exe" "' + base + '\\app_web.py"',
         ":end",
         'del "%~f0"',
     ]
