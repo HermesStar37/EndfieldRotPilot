@@ -521,6 +521,40 @@ def _fix_names_core():
 
 _fix_names_core()
 
+def _sync_roster_with_dirs():
+    """更新会把官方 roster.json 覆盖回来；把目录里还留着的自制干员补回名单。"""
+    od = os.path.join(CORE_DIR, "operators")
+    rp = os.path.join(od, "roster.json")
+    try:
+        dirs = [d for d in os.listdir(od) if os.path.isdir(os.path.join(od, d))]
+    except OSError:
+        return
+    try:
+        roster = json.load(open(rp, encoding="utf-8-sig")) if os.path.exists(rp) else {}
+    except Exception:
+        roster = {}
+    if not isinstance(roster, dict):
+        roster = {}
+    known = {str(v) for v in roster.values()}
+    missing = [d for d in sorted(dirs) if d not in known and not d.startswith("_")]
+    if not missing:
+        return
+    nxt = max([int(k) for k in roster if str(k).isdigit()] or [0]) + 1
+    for nm in missing:
+        roster[str(nxt)] = nm
+        nxt += 1
+    try:
+        tmp = rp + ".merge"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(roster, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, rp)
+        log("roster merged: %s" % ", ".join(missing))
+    except Exception as e:
+        log("roster merge fail: %s" % e)
+
+
+_sync_roster_with_dirs()
+
 import app as core  # noqa: E402  （老版里的数据与图标函数）
 
 PORT = 8777
@@ -760,7 +794,20 @@ def save_cfg(cfg):
     tmp = CFG + (".%d.tmp" % os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CFG)
+    # 目标偶尔被杀软/别的进程占着，重试几次再放弃
+    last = None
+    for _i in range(6):
+        try:
+            os.replace(tmp, CFG)
+            return
+        except OSError as e:
+            last = e
+            time.sleep(0.15)
+    log("save_cfg fail: %s" % last)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
 
 
 # ---------------- 内置示例轴 ----------------
