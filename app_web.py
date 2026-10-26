@@ -3050,8 +3050,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/update/download":
             url = str(body.get("url") or "")
-            if not url:
-                return self._send(400, {"ok": False, "error": "no url"})
+            log("update download requested: %s" % (url[:120] or "(empty)"))
+            if not url or not url.lower().startswith("http"):
+                return self._send(400, {"ok": False, "error": "没有下载地址"})
             update_download(url)
             return self._send(200, {"ok": True})
 

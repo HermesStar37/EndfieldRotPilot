@@ -2954,6 +2954,15 @@ async function startUpdate(url, size) {
   const timer = setInterval(async () => {
     let p;
     try { p = await api.get("/api/update/progress"); } catch (e) { return; }
+    if (!p || typeof p.state !== "string") {
+      clearInterval(timer);
+      openUpdPanel("更新没启动",
+        "后台没有更新接口。\n\n常见原因：\n" +
+        "· 有另一个旧版本程序还在运行（端口被它占着）\n" +
+        "· 这个窗口连的不是刚启动的那个实例\n\n" +
+        "处理：把所有黑框和窗口关掉，重新双击 启动.bat。", []);
+      return;
+    }
     const bar = document.getElementById("updBar");
     const txt = document.getElementById("updText");
     if (p.state === "downloading") {
