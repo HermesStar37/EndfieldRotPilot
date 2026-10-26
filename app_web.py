@@ -439,7 +439,7 @@ def update_apply():
 
 # 版本信息（设置里「关于」显示用）
 
-APP_VERSION = "v1.4"
+APP_VERSION = "v1.4.0"
 APP_BUILD = "2026-10-26"
 
 
