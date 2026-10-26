@@ -384,19 +384,10 @@ def update_apply():
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
     inner = os.path.join(dst, root_name)
 
-    # 最终目录：统一叫 EndfieldRotPilot，且不再套一层版本文件夹
-    base_name = os.path.basename(base)
-    desired = base
-    if base_name == "EndfieldRotPilot":
-        pname = os.path.basename(parent)
-        if re.match(vz, pname):                      # 外面那层带版本号
-            desired = os.path.join(os.path.dirname(parent), "EndfieldRotPilot")
-    elif re.match(vz, base_name):                    # 自己就带版本号
-        desired = os.path.join(parent, "EndfieldRotPilot")
-
     cfg = os.path.join(base, "config.json")
     cfgbak = os.path.join(base, "config.json.bak")
 
+    # 单层目录：只覆盖当前文件夹，不改名、不搬家
     L = [
         "@echo off",
         "chcp 65001 >nul",
@@ -416,22 +407,8 @@ def update_apply():
         'if not exist "' + inner + '\\app_web.py" goto extractfail',
         'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
-        'set "RUN=' + base + '"',
-    ]
-    if desired != base:
-        L += [
-            'set "DEST=' + desired + '"',
-            'if exist "%DEST%\\app_web.py" goto noshift',
-            'robocopy "' + base + '" "%DEST%" /E /XF web_run.log /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
-            'echo shift rc=%errorlevel% >> "%LOG%"',
-            'if exist "%DEST%\\app_web.py" set "RUN=%DEST%"',
-            ":noshift",
-        ]
-    L += [
-        'if not exist "%RUN%\\app_web.py" set "RUN=' + base + '"',
-        'echo run=%RUN% >> "%LOG%"',
-        'if exist "%RUN%\\runtime\\pythonw.exe" (start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py") '
-        'else (start "" "%RUN%\\runtime\\python.exe" "%RUN%\\app_web.py")',
+        'echo run=' + base + ' >> "%LOG%"',
+        'start "" "' + base + '\\runtime\\pythonw.exe" "' + base + '\\app_web.py"',
         'echo started >> "%LOG%"',
         'goto end',
         ":extractfail",
