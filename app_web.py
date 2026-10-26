@@ -27,12 +27,16 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-# GitHub 更新
+# ---------- GitHub 更新 ----------
 UPDATE_REPO = "HermesStar37/EndfieldRotPilot"
 UPDATE_API = os.environ.get("ROTPILOT_UPDATE_API", "https://api.github.com")
 UPDATE_MIRROR = os.environ.get("ROTPILOT_UPDATE_MIRROR", "")   # 例如 https://ghproxy.net/
 UPDATE_DIR = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update")
-_UPDATE = {"state": "idle", "received": 0, "total": 0, "path": "", "error": ""}
+UPDATE_CACHE_SECS = 600
+
+_UPDATE = {"state": "idle", "received": 0, "total": 0, "path": "",
+           "error": "", "url": ""}
+_REL_CACHE = {"at": 0.0, "list": None, "err": ""}
 
 
 def _ver_tuple(v):
@@ -43,7 +47,7 @@ def _ver_tuple(v):
     return tuple(nums)
 
 
-def _update_get(url, timeout=15):
+def _gh_json(url, timeout=15):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot",
                                                "Accept": "application/vnd.github+json"})
@@ -51,54 +55,111 @@ def _update_get(url, timeout=15):
         return json.loads(r.read().decode("utf-8"))
 
 
-def update_check():
-    """读 GitHub 的 Release，挑出「版本号型」的最新一个，和本地比。"""
-    base = UPDATE_API.rstrip("/")
-    data = None
-    try:
-        # 先拿列表：里面可能有「新干员」这种非版本号 tag，要跳过
-        items = _update_get("%s/repos/%s/releases?per_page=30" % (base, UPDATE_REPO))
-        best = None
-        best_tuple = ()
-        for it in items if isinstance(items, list) else []:
-            tag = str(it.get("tag_name") or "")
-            if not re.search(r"\d", tag):
-                continue
-            vt = _ver_tuple(tag)
-            if best is None or vt > best_tuple:
-                best, best_tuple = it, vt
-        if best is None:
-            data = _update_get("%s/repos/%s/releases/latest" % (base, UPDATE_REPO))
-        else:
-            data = best
-    except Exception as e:
-        try:
-            data = _update_get("%s/repos/%s/releases/latest" % (base, UPDATE_REPO))
-        except Exception as e2:
-            return {"ok": False, "error": "连不上 GitHub：%s" % e2, "current": APP_VERSION}
+def _latest_tag_redirect():
+    """用 releases/latest 的 302 跳转取 tag：不花 API 额度。"""
+    import urllib.request
 
-    latest = str(data.get("tag_name") or "").strip()
-    assets = data.get("assets") or []
-    url = ""
-    size = 0
-    for a in assets:
+    class _NoRedir(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    url = "https://github.com/%s/releases/latest" % UPDATE_REPO
+    op = urllib.request.build_opener(_NoRedir)
+    req = urllib.request.Request(url, method="HEAD",
+                                 headers={"User-Agent": "EndfieldRotPilot"})
+    try:
+        op.open(req, timeout=12)
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location") or ""
+        m = re.search(r"/tag/([^/?#]+)", loc)
+        if m:
+            from urllib.parse import unquote
+            return unquote(m.group(1))
+        raise
+    return ""
+
+
+def _releases(force=False):
+    """Release 列表，带 10 分钟缓存，省 API 额度。"""
+    now = time.time()
+    if (not force and _REL_CACHE["list"] is not None
+            and now - _REL_CACHE["at"] < UPDATE_CACHE_SECS):
+        return _REL_CACHE["list"], _REL_CACHE["err"]
+    try:
+        data = _gh_json("%s/repos/%s/releases?per_page=30"
+                        % (UPDATE_API.rstrip("/"), UPDATE_REPO))
+        lst = data if isinstance(data, list) else []
+        _REL_CACHE.update({"at": now, "list": lst, "err": ""})
+        return lst, ""
+    except Exception as e:
+        _REL_CACHE.update({"at": now, "list": None, "err": str(e)})
+        return None, str(e)
+
+
+def _pick_release(rels):
+    """挑版本号最大的那个 release（跳过「新干员」这种非版本 tag）。"""
+    best, bt = None, None
+    for it in rels or []:
+        tag = str(it.get("tag_name") or "")
+        if not re.search(r"\d", tag):
+            continue
+        vt = _ver_tuple(tag)
+        if best is None or vt > bt:
+            best, bt = it, vt
+    return best
+
+
+def _release_assets(rel):
+    """返回 (zip 下载地址, 大小)：优先非 operators 的 zip。"""
+    url, size = "", 0
+    for a in (rel or {}).get("assets") or []:
         n = str(a.get("name") or "")
         if n.lower().endswith(".zip") and not n.lower().startswith("operators"):
-            url = a.get("browser_download_url") or ""
-            size = int(a.get("size") or 0)
+            url, size = a.get("browser_download_url") or "", int(a.get("size") or 0)
             break
     if not url:
-        for a in assets:
+        for a in (rel or {}).get("assets") or []:
             if str(a.get("name") or "").lower().endswith(".zip"):
-                url = a.get("browser_download_url") or ""
-                size = int(a.get("size") or 0)
+                url, size = a.get("browser_download_url") or "", int(a.get("size") or 0)
                 break
     if UPDATE_MIRROR and url:
         url = UPDATE_MIRROR.rstrip("/") + "/" + url
-    return {"ok": True, "current": APP_VERSION, "latest": latest or APP_VERSION,
-            "newer": bool(latest) and _ver_tuple(latest) > _ver_tuple(APP_VERSION),
-            "notes": (data.get("body") or "")[:6000], "url": url, "size": size,
-            "page": data.get("html_url") or ""}
+    return url, size
+
+
+def update_check():
+    """检查更新：先走跳转拿版本号，再尽量从 API 补更新说明。"""
+    tag, err = "", ""
+    try:
+        tag = _latest_tag_redirect()
+    except Exception as e:
+        err = str(e)
+    # 跳转可能指向「新干员」这种非版本 tag，认不出就不用
+    if tag and not re.search(r"\d+\.\d+", tag):
+        tag = ""
+
+    rels, rerr = _releases()
+    rel = _pick_release(rels)
+    if rel:
+        tag = str(rel.get("tag_name") or tag)
+    elif not tag:
+        err = err or rerr or "未知错误"
+
+    if not tag:
+        return {"ok": False, "current": APP_VERSION,
+                "error": "连不上 GitHub：%s" % err}
+
+    latest = tag.strip()
+    notes, page = "", ""
+    url, size = "", 0
+    if rel:
+        notes = (rel.get("body") or "")[:6000]
+        page = rel.get("html_url") or ""
+        url, size = _release_assets(rel)
+    return {"ok": True, "current": APP_VERSION, "latest": latest,
+            "newer": _ver_tuple(latest) > _ver_tuple(APP_VERSION),
+            "notes": notes, "url": url, "size": size, "page": page,
+            "warning": "" if rel else "GitHub 接口限流，这次只拿到版本号"}
 
 
 def import_operators_pack(data, filename=""):
@@ -136,69 +197,97 @@ def import_operators_pack(data, filename=""):
         if ok:
             names.append(info.get("name") if isinstance(info, dict) else str(info))
         else:
-            errors.append("%s: %s" % (os.path.basename(root), info if not isinstance(info, dict) else info.get("error")))
+            errors.append("%s: %s" % (os.path.basename(root),
+                                      info if not isinstance(info, dict)
+                                      else info.get("error")))
     if not names:
         return False, {}, "；".join(errors[:3]) or "全部导入失败"
     return True, {"count": len(names), "names": names, "errors": errors[:3]}, ""
 
 
 def update_ops_check():
-    """看最新 Release 里有没有干员包（operators_*.zip）。"""
-    try:
-        data = _update_get("%s/repos/%s/releases/latest" % (UPDATE_API.rstrip("/"), UPDATE_REPO))
-    except Exception as e:
-        return {"ok": False, "error": "连不上 GitHub：%s" % e}
-    asset = None
-    for a in (data.get("assets") or []):
-        n = str(a.get("name") or "")
-        if n.lower().startswith("operators") and n.lower().endswith(".zip"):
-            asset = a
+    """在所有 Release 里找最新的干员包（operators_*.zip）。"""
+    rels, err = _releases()
+    if rels is None:
+        return {"ok": False, "error": "连不上 GitHub：%s" % err}
+    asset, rel_tag = None, ""
+    for it in rels:
+        for a in it.get("assets") or []:
+            n = str(a.get("name") or "").lower()
+            if n.startswith("operators") and n.endswith(".zip"):
+                asset, rel_tag = a, str(it.get("tag_name") or "")
+                break
+        if asset:
             break
     if not asset:
-        return {"ok": True, "found": False, "latest": data.get("tag_name") or ""}
+        return {"ok": True, "found": False, "latest": rel_tag}
+    url = asset.get("browser_download_url") or ""
+    if UPDATE_MIRROR and url:
+        url = UPDATE_MIRROR.rstrip("/") + "/" + url
     cfg = load_cfg()
     local = (cfg.get("opPack") or {}).get("name") or ""
-    return {"ok": True, "found": True,
+    return {"ok": True, "found": True, "release": rel_tag,
             "name": asset.get("name"), "size": int(asset.get("size") or 0),
-            "url": asset.get("browser_download_url"),
-            "published": asset.get("updated_at") or "",
-            "installed": local, "newer": bool(local) is False or local != asset.get("name")}
+            "url": url, "published": asset.get("updated_at") or "",
+            "installed": local, "same": local == asset.get("name")}
 
-def update_download(url):
-    """后台下载更新包，进度写进 _UPDATE。"""
+
+def update_download(url, expect_size=0):
+    """后台下载更新包：写 .part，校验后原子替换，失败自动重试一次。"""
     import urllib.request
-    _UPDATE.update({"state": "downloading", "received": 0, "total": 0, "path": "", "error": ""})
+    _UPDATE.update({"state": "downloading", "received": 0, "total": expect_size,
+                    "path": "", "error": "", "url": url})
     os.makedirs(UPDATE_DIR, exist_ok=True)
     path = os.path.join(UPDATE_DIR, "update.zip")
-    log("update download: dir=%s url=%s" % (UPDATE_DIR, url[:120]))
+    part = path + ".part"
+    log("update download: dir=%s expect=%d url=%s" % (UPDATE_DIR, expect_size, url[:120]))
 
     def run():
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
-            with urllib.request.urlopen(req, timeout=30) as r, open(path, "wb") as f:
-                total = int(r.headers.get("Content-Length") or 0)
-                _UPDATE["total"] = total
-                while True:
-                    chunk = r.read(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    _UPDATE["received"] += len(chunk)
-            size = os.path.getsize(path) if os.path.exists(path) else 0
-            log("update download done: %s (%d bytes)" % (path, size))
-            if size < 1024:
-                _UPDATE.update({"state": "error", "error": "下到的文件只有 %d 字节" % size})
+        last = ""
+        for attempt in (1, 2):
+            try:
+                try:
+                    os.remove(part)
+                except OSError:
+                    pass
+                req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
+                with urllib.request.urlopen(req, timeout=30) as r, open(part, "wb") as f:
+                    total = int(r.headers.get("Content-Length") or 0) or expect_size
+                    _UPDATE["total"] = total
+                    while True:
+                        chunk = r.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        _UPDATE["received"] += len(chunk)
+                size = os.path.getsize(part)
+                log("update download: attempt %d got %d bytes" % (attempt, size))
+                if size < 1024:
+                    raise RuntimeError("文件只有 %d 字节" % size)
+                if expect_size and abs(size - expect_size) > 4096:
+                    raise RuntimeError("大小不符：%d / 期望 %d" % (size, expect_size))
+                os.replace(part, path)
+                _UPDATE.update({"state": "done", "path": path})
+                log("update download done: %s (%d bytes)" % (path, size))
                 return
-            _UPDATE.update({"state": "done", "path": path})
-        except Exception as e:
-            _UPDATE.update({"state": "error", "error": str(e)})
-            log("update download fail: %s" % e)
+            except Exception as e:
+                last = str(e)
+                log("update download fail (try %d): %s" % (attempt, e))
+                try:
+                    os.remove(part)
+                except OSError:
+                    pass
+                _UPDATE.update({"state": "downloading", "received": 0})
+                time.sleep(1.5)
+        _UPDATE.update({"state": "error", "error": last or "下载失败"})
 
     threading.Thread(target=run, daemon=True).start()
 
 
 def update_apply():
-    """写 bat：解压覆盖 → 必要时把外层版本文件夹改名 → 重启。"""
+    """校验更新包 → 写 bat（解压、覆盖、改名、重启）→ 关旧窗口 → 退出。"""
+    import zipfile
+
     zip_path = _UPDATE.get("path") or ""
     if not zip_path or not os.path.exists(zip_path):
         cand = os.path.join(UPDATE_DIR, "update.zip")
@@ -208,20 +297,32 @@ def update_apply():
         log("update apply: no zip")
         return False, "没有找到更新包：%s" % os.path.join(UPDATE_DIR, "update.zip")
 
-    # 从更新包里读出版本号
-    new_ver = ""
+    # 1) 校验更新包：必须有 <根目录>/app_web.py
+    root_name, new_ver = "", ""
     try:
-        import zipfile
         with zipfile.ZipFile(zip_path) as z:
-            for n in z.namelist():
-                if n.endswith("app_web.py"):
+            names = z.namelist()
+            for n in names:
+                if n.endswith("/app_web.py"):
+                    root_name = n.split("/")[0]
                     txt = z.read(n).decode("utf-8", "ignore")
                     m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', txt)
                     if m:
                         new_ver = m.group(1)
                     break
     except Exception as e:
-        log("update apply: read version fail %s" % e)
+        return False, "更新包损坏：%s" % e
+    if not root_name:
+        return False, "更新包里没找到 app_web.py"
+
+    # 2) 目录是否可写
+    try:
+        probe = os.path.join(BASE, ".rotpilot_write_test")
+        with open(probe, "w") as f:
+            f.write("1")
+        os.remove(probe)
+    except Exception:
+        return False, "程序目录不可写，请把程序放到 D:\\ 之类的目录再更新"
 
     base = BASE.rstrip("\\/")
     parent = os.path.dirname(base)
@@ -234,15 +335,12 @@ def update_apply():
             return None
         return "%s_%s" % (m.group(1), new_ver)
 
-    new_base = base
-    move_src = ""
-    # 情况 1：程序目录本身带版本号
+    new_base, move_src = base, ""
     nn = _new_name(old_name)
     if nn:
         cand = os.path.join(parent, nn)
         if not os.path.exists(cand):
             new_base, move_src = cand, base
-    # 情况 2：外面那层文件夹带版本号（常见：EndfieldRotPilot_v1.3.9_test\EndfieldRotPilot）
     if not move_src:
         pname = os.path.basename(parent)
         pn = _new_name(pname)
@@ -251,33 +349,42 @@ def update_apply():
             if not os.path.exists(new_parent):
                 move_src = parent
                 new_base = os.path.join(new_parent, old_name)
-    log("update apply: version=%s dir %r -> %r (move %r)" % (new_ver, base, new_base, move_src))
+    log("update apply: version=%s base=%r new=%r move=%r"
+        % (new_ver, base, new_base, move_src))
 
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
-    inner = os.path.join(dst, "EndfieldRotPilot")
+    inner = os.path.join(dst, root_name)
     cfg = os.path.join(base, "config.json")
     cfgbak = os.path.join(base, "config.json.bak")
+    run = new_base
+
     L = [
         "@echo off",
         "chcp 65001 >nul",
         'set LOG=%TEMP%\\rotpilot_update.log',
         'cd /d "%TEMP%"',
         'echo ==== start %date% %time% ==== >> "%LOG%"',
-        "timeout /t 2 /nobreak >nul",
+        "timeout /t 3 /nobreak >nul",
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
         'mkdir "' + dst + '"',
         'tar -xf "' + zip_path + '" -C "' + dst + '" >> "%LOG%" 2>&1',
         'echo extract rc=%errorlevel% >> "%LOG%"',
+        'if exist "' + inner + '\\app_web.py" goto extractok',
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath \''
+        + zip_path + '\' -DestinationPath \'' + dst + '\' -Force" >> "%LOG%" 2>&1',
+        ":extractok",
+        'if not exist "' + inner + '\\app_web.py" goto extractfail',
+    ]
+    L += [
         'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
         'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
     ]
-    run_dir = new_base
+    L += ['set "RUN=' + run + '"']
     if new_base != base and move_src:
         move_target = new_base if move_src == base else os.path.dirname(new_base)
         L += [
-            'set "RUN=' + new_base + '"',
             'set "TRIES=0"',
             ":trymove",
             'if exist "' + move_target + '" goto moved',
@@ -293,27 +400,37 @@ def update_apply():
             'set "RUN=' + base + '"',
             ":moved",
         ]
-    else:
-        L += ['set "RUN=' + run_dir + '"']
     L += [
         'if not exist "%RUN%\\app_web.py" set "RUN=' + base + '"',
         'echo run=%RUN% >> "%LOG%"',
-        'start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py"',
-        'echo start rc=%errorlevel% >> "%LOG%"',
+        'if exist "%RUN%\\runtime\\pythonw.exe" (start "" "%RUN%\\runtime\\pythonw.exe" "%RUN%\\app_web.py") '
+        'else (start "" "%RUN%\\runtime\\python.exe" "%RUN%\\app_web.py")',
+        'echo started >> "%LOG%"',
+        'goto end',
+        ":extractfail",
+        'echo extract failed, keep old files >> "%LOG%"',
+        'start "" "' + base + '\\runtime\\pythonw.exe" "' + base + '\\app_web.py"',
+        ":end",
         'del "%~f0"',
     ]
+
     with open(bat, "w", encoding="utf-8", newline="") as f:
         f.write("\r\n".join(L) + "\r\n")
-    log("update apply: bat=%s zip=%s" % (bat, zip_path))
+
+    log("update apply: bat=%s zip=%s root=%s" % (bat, zip_path, root_name))
     try:
         close_app_window()
     except Exception as e:
         log("close window fail %s" % e)
+
     import subprocess
     subprocess.Popen(["cmd", "/c", bat], cwd=os.environ.get("TEMP", BASE),
                      creationflags=0x08000000)
     return True, bat
+
+
 # 版本信息（设置里「关于」显示用）
+
 APP_VERSION = "v1.4"
 APP_BUILD = "2026-10-26"
 
@@ -3171,10 +3288,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/update/download":
             url = str(body.get("url") or "")
-            log("update download requested: %s" % (url[:120] or "(empty)"))
+            try:
+                expect = int(body.get("size") or 0)
+            except Exception:
+                expect = 0
+            log("update download requested: %s (expect=%d)" % (url[:120] or "(empty)", expect))
             if not url or not url.lower().startswith("http"):
                 return self._send(400, {"ok": False, "error": "没有下载地址"})
-            update_download(url)
+            update_download(url, expect)
             return self._send(200, {"ok": True})
 
         if u.path == "/api/update/apply":
