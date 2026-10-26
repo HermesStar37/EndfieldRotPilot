@@ -820,8 +820,15 @@ function renderGrid() {
   state.ops
     .filter((o) => !state.pickElem || o.element === state.pickElem)
     .slice()
-    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0) ||
-      String(a.name).localeCompare(String(b.name), "zh"))
+    .sort((a, b) => {
+      // 最近导入的排最前（按导入先后），其余保持原有顺序不动
+      const ra = a.recent == null ? -1 : a.recent;
+      const rb = b.recent == null ? -1 : b.recent;
+      if (ra >= 0 && rb >= 0) return ra - rb;
+      if (ra >= 0) return -1;
+      if (rb >= 0) return 1;
+      return (a.slot || 0) - (b.slot || 0);
+    })
     .forEach((o) => {
       const c = document.createElement("div");
       c.className = "card";

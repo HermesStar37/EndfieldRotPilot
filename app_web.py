@@ -3112,6 +3112,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/ops":
             _refresh_roster_if_changed()
+            recent = [str(x) for x in (load_cfg().get("recentOps") or [])]
+            rank = {n: i for i, n in enumerate(recent)}
             out = []
             for i, n in enumerate(core.OPS):
                 if not n:
@@ -3119,6 +3121,7 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({
                     "slot": i,
                     "name": n,
+                    "recent": rank.get(n, -1),
                     "element": read_txt(core.op_file(n, "element.txt")),
                     "cls": read_txt(core.op_file(n, "class.txt")),
                     "mtime": int(os.path.getmtime(os.path.join(CORE_DIR, "operators", n)))
@@ -3300,6 +3303,17 @@ class Handler(BaseHTTPRequestHandler):
                 ok, info, err = import_operators_pack(data, name)
                 if ok:
                     installed.append(name)
+                    try:
+                        cfg0 = load_cfg()
+                        rec = [str(x) for x in (cfg0.get("recentOps") or [])]
+                        for nm0 in (info.get("names") or []):
+                            nm0 = str(nm0)
+                            rec = [x for x in rec if x != nm0]
+                            rec.insert(0, nm0)
+                        cfg0["recentOps"] = rec[:60]
+                        save_cfg(cfg0)
+                    except Exception:
+                        pass
                     results.append({"name": name, "ok": True,
                                     "count": info.get("count", 0),
                                     "names": info.get("names", []),
@@ -3452,6 +3466,15 @@ class Handler(BaseHTTPRequestHandler):
                 log("import crash: " + traceback.format_exc())
                 return self._send(500, {"ok": False, "error": str(e)})
             if ok:
+                try:
+                    nm = (res or {}).get("name") if isinstance(res, dict) else ""
+                    if nm:
+                        cfg = load_cfg()
+                        rec = [str(x) for x in (cfg.get("recentOps") or []) if str(x) != nm]
+                        cfg["recentOps"] = ([nm] + rec)[:60]
+                        save_cfg(cfg)
+                except Exception:
+                    pass
                 return self._send(200, {"ok": True, **res})
             return self._send(400, {"ok": False, "error": res})
 
