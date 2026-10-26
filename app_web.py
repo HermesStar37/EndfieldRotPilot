@@ -326,21 +326,26 @@ def update_apply():
         return False, "没有找到更新包：%s" % os.path.join(UPDATE_DIR, "update.zip")
 
     # 1) 校验更新包：必须有 <根目录>/app_web.py
-    root_name, new_ver = "", ""
+    root_name, new_ver, entry = "", "", ""
     try:
         with zipfile.ZipFile(zip_path) as z:
             names = z.namelist()
-            for n in names:
-                if n.endswith("/app_web.py"):
-                    root_name = n.split("/")[0]
-                    txt = z.read(n).decode("utf-8", "ignore")
-                    m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', txt)
-                    if m:
-                        new_ver = m.group(1)
-                    break
+            if "app_web.py" in names:
+                entry = "app_web.py"                 # 平铺包：文件直接在根
+            else:
+                for n in names:
+                    if n.endswith("/app_web.py"):
+                        entry = n
+                        root_name = n.split("/")[0]  # 老包：套了一层文件夹
+                        break
+            if entry:
+                txt = z.read(entry).decode("utf-8", "ignore")
+                m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', txt)
+                if m:
+                    new_ver = m.group(1)
     except Exception as e:
         return False, "更新包损坏：%s" % e
-    if not root_name:
+    if not entry:
         return False, "更新包里没找到 app_web.py"
 
     # 2) 目录是否可写
@@ -382,7 +387,7 @@ def update_apply():
 
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
-    inner = os.path.join(dst, root_name)
+    inner = os.path.join(dst, root_name) if root_name else dst
 
     cfg = os.path.join(base, "config.json")
     cfgbak = os.path.join(base, "config.json.bak")
