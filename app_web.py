@@ -179,6 +179,7 @@ def update_apply():
         "timeout /t 2 /nobreak >nul",
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
         'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps_cmd + '"',
+        'copy /y "' + os.path.join(BASE, "config.json") + '" "' + os.path.join(BASE, "config.json.bak") + '" >nul 2>nul',
         'robocopy "' + inner + '" "' + BASE + '" /E /XF config.json /NFL /NDL /NJH /NJS',
         'start "" "' + exe + '"',
         'del "%~f0"',
