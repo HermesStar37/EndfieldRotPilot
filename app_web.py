@@ -198,7 +198,7 @@ def update_download(url):
 
 
 def update_apply():
-    """写一个 bat：退出后解压覆盖并重启（隐藏窗口，保留 config.json）。"""
+    """写 bat：解压覆盖 → 必要时把外层版本文件夹改名 → 重启。"""
     zip_path = _UPDATE.get("path") or ""
     if not zip_path or not os.path.exists(zip_path):
         cand = os.path.join(UPDATE_DIR, "update.zip")
@@ -207,19 +207,62 @@ def update_apply():
     if not zip_path or not os.path.exists(zip_path):
         log("update apply: no zip")
         return False, "没有找到更新包：%s" % os.path.join(UPDATE_DIR, "update.zip")
+
+    # 从更新包里读出版本号
+    new_ver = ""
+    try:
+        import zipfile
+        with zipfile.ZipFile(zip_path) as z:
+            for n in z.namelist():
+                if n.endswith("app_web.py"):
+                    txt = z.read(n).decode("utf-8", "ignore")
+                    m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', txt)
+                    if m:
+                        new_ver = m.group(1)
+                    break
+    except Exception as e:
+        log("update apply: read version fail %s" % e)
+
+    base = BASE.rstrip("\\/")
+    parent = os.path.dirname(base)
+    old_name = os.path.basename(base)
+    vz = r"^(.*?)[_-]v?\d+(?:\.\d+)*(_test)?$"
+
+    def _new_name(name):
+        m = re.match(vz, name)
+        if not (new_ver and m):
+            return None
+        return "%s_%s" % (m.group(1), new_ver)
+
+    new_base = base
+    move_src = ""
+    # 情况 1：程序目录本身带版本号
+    nn = _new_name(old_name)
+    if nn:
+        cand = os.path.join(parent, nn)
+        if not os.path.exists(cand):
+            new_base, move_src = cand, base
+    # 情况 2：外面那层文件夹带版本号（常见：EndfieldRotPilot_v1.3.9_test\EndfieldRotPilot）
+    if not move_src:
+        pname = os.path.basename(parent)
+        pn = _new_name(pname)
+        if pn:
+            new_parent = os.path.join(os.path.dirname(parent), pn)
+            if not os.path.exists(new_parent):
+                move_src = parent
+                new_base = os.path.join(new_parent, old_name)
+    log("update apply: version=%s dir %r -> %r (move %r)" % (new_ver, base, new_base, move_src))
+
     dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
     bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
-    logf = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.log")
     inner = os.path.join(dst, "EndfieldRotPilot")
-    exe = os.path.join(BASE, "启动.bat")
-    pyw = os.path.join(BASE, "runtime", "pythonw.exe")
-    launcher = (pyw if os.path.exists(pyw) else os.path.join(BASE, "runtime", "python.exe")) + '" "' + os.path.join(BASE, "app_web.py")
-    cfg = os.path.join(BASE, "config.json")
-    cfgbak = os.path.join(BASE, "config.json.bak")
+    cfg = os.path.join(base, "config.json")
+    cfgbak = os.path.join(base, "config.json.bak")
     L = [
         "@echo off",
         "chcp 65001 >nul",
         'set LOG=%TEMP%\\rotpilot_update.log',
+        'cd /d "%TEMP%"',
         'echo ==== start %date% %time% ==== >> "%LOG%"',
         "timeout /t 2 /nobreak >nul",
         'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
@@ -227,18 +270,28 @@ def update_apply():
         'tar -xf "' + zip_path + '" -C "' + dst + '" >> "%LOG%" 2>&1',
         'echo extract rc=%errorlevel% >> "%LOG%"',
         'copy /y "' + cfg + '" "' + cfgbak + '" >nul 2>nul',
-        'robocopy "' + inner + '" "' + BASE + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
+        'robocopy "' + inner + '" "' + base + '" /E /XF config.json /NFL /NDL /NJH /NJS >> "%LOG%" 2>&1',
         'echo copy rc=%errorlevel% >> "%LOG%"',
-        'start "" "' + launcher + '"',
+    ]
+    if new_base != base and move_src:
+        move_target = new_base if move_src == base else os.path.dirname(new_base)
+        L += [
+            'if exist "' + move_target + '" goto skipmove',
+            'move "' + move_src + '" "' + move_target + '" >> "%LOG%" 2>&1',
+            'echo move rc=%errorlevel% >> "%LOG%"',
+            ":skipmove",
+        ]
+    L += [
+        'start "" "' + new_base + '\\runtime\\pythonw.exe" "' + new_base + '\\app_web.py"',
         'echo start rc=%errorlevel% >> "%LOG%"',
         'del "%~f0"',
     ]
-    # bat 里带中文路径（启动.bat），必须用 UTF-8 写，配合 chcp 65001
     with open(bat, "w", encoding="utf-8", newline="") as f:
         f.write("\r\n".join(L) + "\r\n")
     log("update apply: bat=%s zip=%s" % (bat, zip_path))
     import subprocess
-    subprocess.Popen(["cmd", "/c", bat], cwd=BASE, creationflags=0x08000000)
+    subprocess.Popen(["cmd", "/c", bat], cwd=os.environ.get("TEMP", BASE),
+                     creationflags=0x08000000)
     return True, bat
 # 版本信息（设置里「关于」显示用）
 APP_VERSION = "v1.4"
