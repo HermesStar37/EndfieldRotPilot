@@ -289,6 +289,10 @@ def update_apply():
     with open(bat, "w", encoding="utf-8", newline="") as f:
         f.write("\r\n".join(L) + "\r\n")
     log("update apply: bat=%s zip=%s" % (bat, zip_path))
+    try:
+        close_app_window()
+    except Exception as e:
+        log("close window fail %s" % e)
     import subprocess
     subprocess.Popen(["cmd", "/c", bat], cwd=os.environ.get("TEMP", BASE),
                      creationflags=0x08000000)
@@ -3354,6 +3358,8 @@ WIN_X, WIN_Y = 370, 140
 SCREEN_MODES = ("game", "primary", "secondary")
 GAME_HINTS = ("endfield", "终末地", "arknights")
 _OWN_TITLES = ("Endfield RotPilot",)
+_BROWSER_PID = [0]
+
 _BROWSER_EXES = ("msedge.exe", "chrome.exe", "brave.exe", "vivaldi.exe",
                  "firefox.exe", "opera.exe")
 # 这些进程永远不可能是游戏（窗口标题里带 endfield 的文件夹窗口会被误判，必须排掉）
@@ -4052,6 +4058,40 @@ def _find_browser():
     return None, None
 
 
+def close_app_window():
+    """把我们开的那个 --app 窗口关掉（发 WM_CLOSE，不会误杀其他 Edge 窗口）。"""
+    import subprocess
+    flags = 0x08000000
+    closed = 0
+    try:
+        u = ctypes.windll.user32
+        hwnds = []
+        hwnds += _main_windows("Endfield RotPilot")
+        hwnds += _main_windows("Endfield RotPilot 旧版测试")
+        for h in set(hwnds):
+            if u.PostMessageW(wintypes.HWND(h), 0x0010, 0, 0):   # WM_CLOSE
+                closed += 1
+        log("browser WM_CLOSE sent to %d window(s)" % closed)
+    except Exception as e:
+        log("browser close fail %s" % e)
+    if closed:
+        return
+    # 兜底：按 pid / 命令行找
+    pid = _BROWSER_PID[0]
+    try:
+        if pid:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           creationflags=flags, capture_output=True)
+        else:
+            ps = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "
+                  "'*--app=http://127.0.0.1:" + str(PORT) + "*' } | "
+                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           creationflags=flags, capture_output=True)
+    except Exception as e:
+        log("browser kill fail %s" % e)
+
+
 def open_app_window(url):
     """用 Chromium 浏览器的 --app 模式打开，看起来像原生窗口。"""
     if os.environ.get("ROTPILOT_NO_BROWSER") == "1":
@@ -4062,13 +4102,14 @@ def open_app_window(url):
     if exe:
         try:
             rect = _want_rect()
-            subprocess.Popen([exe, f"--app={url}",
+            _p = subprocess.Popen([exe, f"--app={url}",
                               f"--window-size={rect[2]},{rect[3]}",
                               f"--window-position={rect[0]},{rect[1]}",
                               "--no-first-run", "--no-default-browser-check",
                               "--disable-features=Translate,msEdgeTranslate"],
                              close_fds=True)
-            log("browser: %s" % exe)
+            _BROWSER_PID[0] = _p.pid
+            log("browser: %s (pid=%d)" % (exe, _p.pid))
             threading.Thread(target=_force_window_size, daemon=True).start()
             return True
         except Exception as e:
