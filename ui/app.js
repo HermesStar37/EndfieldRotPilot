@@ -2851,7 +2851,7 @@ function panMenu() {
     box.appendChild(b);
   };
   mk("GitHub 更新", "检查新版本并一键更新", checkUpdate);
-  mk("更新干员", "从 GitHub 拉最新干员包", checkOpsPack);
+  mk("更新干员", "列出所有干员包，自己选要装哪些", checkOpsPack);
   document.body.appendChild(box);
   setTimeout(() => document.addEventListener("click", function off(e) {
     if (box && !box.contains(e.target) && e.target.id !== "btnPan") { box.remove(); }
@@ -2893,12 +2893,13 @@ function openUpdPanel(title, text, actions) {
   box = document.createElement("div");
   box.id = "updBox";
   box.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;" +
-    "width:min(660px,92vw);max-height:76vh;background:#1e1f22;color:#e6e6e6;border:1px solid #444;" +
+    "width:min(660px,92vw);max-height:78vh;background:#1e1f22;color:#e6e6e6;border:1px solid #444;" +
     "border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;";
   box.innerHTML =
     '<div style="padding:10px 12px;background:#2a2c30;font:700 13px \'Microsoft YaHei UI\';display:flex;align-items:center;gap:8px">' +
       '<span id="updTitle" style="flex:1"></span><button id="updClose" class="mini">关闭</button></div>' +
     '<pre id="updText" style="margin:0;padding:12px;overflow:auto;white-space:pre-wrap;font:12px/1.7 \'Microsoft YaHei UI\';flex:1"></pre>' +
+    '<div id="updList" style="display:none;padding:6px 12px;overflow:auto;flex:1;flex-direction:column;gap:4px"></div>' +
     '<div id="updProg" style="display:none;padding:0 12px 8px"><div style="height:8px;background:#333;border-radius:4px;overflow:hidden">' +
       '<div id="updBar" style="height:100%;width:0;background:#ffd400;transition:width .2s"></div></div></div>' +
     '<div id="updBtns" style="padding:10px 12px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #333"></div>';
@@ -2922,7 +2923,7 @@ async function startUpdate(url, size) {
   const box = openUpdPanel("正在下载更新…", "准备下载…", []);
   box.querySelector("#updProg").style.display = "block";
   let r;
-  try { r = await api.post("/api/update/download", { url }); }
+  try { r = await api.post("/api/update/download", { url, size }); }
   catch (e) { r = { ok: false, error: String(e) }; }
   if (!r || !r.ok) {
     return openUpdPanel("下载没启动", (r && r.error) || "未知错误",
@@ -2989,46 +2990,100 @@ async function startUpdate(url, size) {
   }, 500);
 }
 
+/* ---------------- 干员包：列出全部，自己勾 ---------------- */
 async function checkOpsPack() {
-  openUpdPanel("检查新干员…", "正在连接 GitHub…", []);
+  openUpdPanel("正在找干员包…", "读取所有 Release…", []);
   let r;
-  try { r = await api.get("/api/update/operators/check"); }
+  try { r = await api.get("/api/update/operators/list"); }
   catch (e) { return openUpdPanel("检查失败", "连不上后台", []); }
-  if (!r || !r.ok) return openUpdPanel("检查失败", (r && r.error) || "无法访问 GitHub", []);
-  if (!r.found) {
-    return openUpdPanel("没有新干员包",
-      `最新版本里没有附带干员包。\n\n` +
-      `说明：干员包要作为 Release 附件，名字以 operators 开头、.zip 结尾。`, []);
+  if (!r || !r.ok) {
+    return openUpdPanel("检查失败", (r && r.error) || "无法访问 GitHub", []);
   }
-  openUpdPanel("发现干员包",
-    `文件：${r.name}\n大小：${fmtMB(r.size)}\n所属版本：${r.release || "-"}\n` +
-    `更新时间：${(r.published || "").slice(0, 16)}\n本机已装：${r.installed || "（没有记录）"}\n\n` +
-    (r.same ? "和本机记录一致，重新导入也没问题。" : "可以导入这一版。"),
-    [
-      ["下载并导入", () => applyOpsPack(r)],
-      ["取消", () => { const b = document.getElementById("updBox"); if (b) b.remove(); }],
-    ]);
+  if (!r.items || !r.items.length) {
+    return openUpdPanel("没有找到干员包",
+      "所有 Release 里都没有 operators 开头的 zip 附件。\n\n" +
+      "要求：附件名以 operators 开头、.zip 结尾。", []);
+  }
+  openOpsList(r.items);
 }
 
-async function applyOpsPack(r) {
-  const box = openUpdPanel("正在下载干员包…", r.name, []);
-  box.querySelector("#updProg").style.display = "block";
-  box.querySelector("#updBar").style.width = "60%";
+function openOpsList(items) {
+  const box = openUpdPanel("选择要导入的干员包", "", []);
+  const pre = box.querySelector("#updText");
+  pre.style.display = "none";
+  const list = box.querySelector("#updList");
+  list.style.display = "flex";
+  list.innerHTML = "";
+  items.forEach((it, i) => {
+    const row = document.createElement("label");
+    row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:6px 8px;" +
+      "border:1px solid #333;border-radius:6px;cursor:pointer;font:12px 'Microsoft YaHei UI';";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !it.installed;
+    cb.dataset.idx = String(i);
+    cb.style.marginTop = "2px";
+    const info = document.createElement("div");
+    info.style.cssText = "flex:1;line-height:1.5";
+    info.innerHTML =
+      `<b>${it.name}</b>${it.installed ? ' <span style="color:#7ee787">（已装过）</span>' : ""}` +
+      `<span style="display:block;color:#9aa0a6">${fmtMB(it.size)}　Release：${it.release || "-"}` +
+      `　${(it.published || "").slice(0, 10)}</span>`;
+    row.appendChild(cb);
+    row.appendChild(info);
+    list.appendChild(row);
+  });
+  const btns = box.querySelector("#updBtns");
+  btns.innerHTML = "";
+  const mkBtn = (label, fn) => {
+    const b = document.createElement("button");
+    b.className = "mini";
+    b.textContent = label;
+    b.onclick = fn;
+    btns.appendChild(b);
+    return b;
+  };
+  mkBtn("全选", () => list.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = true));
+  mkBtn("全不选", () => list.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false));
+  mkBtn("导入所选", () => {
+    const picked = [...list.querySelectorAll("input[type=checkbox]")]
+      .filter(c => c.checked)
+      .map(c => items[Number(c.dataset.idx)]);
+    if (!picked.length) return toast("一个都没选");
+    importOpsSelected(picked);
+  });
+}
+
+async function importOpsSelected(picked) {
+  openUpdPanel("正在导入干员包…", `0 / ${picked.length}`, []);
+  const box = document.getElementById("updBox");
+  if (box) {
+    box.querySelector("#updProg").style.display = "block";
+    box.querySelector("#updBar").style.width = "30%";
+  }
+  let j;
   try {
-    const j = await api.post("/api/update/operators/apply", { url: r.url, name: r.name });
-    if (!j || !j.ok) throw new Error((j && j.error) || "导入失败");
+    j = await api.post("/api/update/operators/apply",
+      { items: picked.map(x => ({ url: x.url, name: x.name })) });
+  } catch (e) {
+    return openUpdPanel("导入失败", String(e), []);
+  }
+  if (!j || !j.results) {
+    return openUpdPanel("导入失败", (j && j.error) || "后台没有返回结果", []);
+  }
+  const okList = j.results.filter(x => x.ok);
+  const badList = j.results.filter(x => !x.ok);
+  if (okList.length) {
     state.ops = await api.get("/api/ops");
     renderAdder(); renderSlots(); renderSeq();
     if (!$("#picker").classList.contains("hidden")) { renderTabs(); renderGrid(); }
-    const res = j.result || {};
-    openUpdPanel("干员包已导入",
-      `共 ${res.count || 0} 名：${(res.names || []).join("、")}\n\n` +
-      ((res.errors && res.errors.length) ? "未导入：" + res.errors.join("；") : ""),
-      [["好", () => { const b = document.getElementById("updBox"); if (b) b.remove(); }]]);
-  } catch (e) {
-    openUpdPanel("导入失败", String(e.message || e),
-      [["重试", () => applyOpsPack(r)]]);
   }
+  const lines = [];
+  okList.forEach(x => lines.push(`✅ ${x.name}：导入 ${x.count || 0} 名` +
+    (x.names && x.names.length ? `（${x.names.join("、")}）` : "")));
+  badList.forEach(x => lines.push(`❌ ${x.name}：${x.error || "失败"}`));
+  openUpdPanel(`导入完成：成功 ${okList.length} / ${j.results.length}`,
+    lines.join("\n"), [["好", () => { const b = document.getElementById("updBox"); if (b) b.remove(); }]]);
 }
 
 $("#btnAddOp").onclick = () => $("#opFile").click();

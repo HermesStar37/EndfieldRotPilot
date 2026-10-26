@@ -205,6 +205,34 @@ def import_operators_pack(data, filename=""):
     return True, {"count": len(names), "names": names, "errors": errors[:3]}, ""
 
 
+def update_ops_list():
+    """列出所有 Release 里的干员包，给用户勾选。"""
+    rels, err = _releases()
+    if rels is None:
+        return {"ok": False, "error": "连不上 GitHub：%s" % err}
+    cfg = load_cfg()
+    done = [str(p.get("name") or "") for p in (cfg.get("opPacks") or []) if isinstance(p, dict)]
+    one = (cfg.get("opPack") or {}).get("name")
+    if one:
+        done.append(str(one))
+    items = []
+    for it in rels:
+        tag = str(it.get("tag_name") or "")
+        for a in it.get("assets") or []:
+            n = str(a.get("name") or "")
+            low = n.lower()
+            if low.startswith("operators") and low.endswith(".zip"):
+                url = a.get("browser_download_url") or ""
+                if UPDATE_MIRROR and url:
+                    url = UPDATE_MIRROR.rstrip("/") + "/" + url
+                items.append({"release": tag, "name": n,
+                              "size": int(a.get("size") or 0), "url": url,
+                              "published": a.get("updated_at") or "",
+                              "installed": n in done})
+    items.sort(key=lambda x: x.get("published") or "", reverse=True)
+    return {"ok": True, "items": items}
+
+
 def update_ops_check():
     """在所有 Release 里找最新的干员包（operators_*.zip）。"""
     rels, err = _releases()
@@ -3001,6 +3029,9 @@ class Handler(BaseHTTPRequestHandler):
         if p.startswith("/ui/"):
             return self._file(os.path.join(BASE, p.lstrip("/")))
 
+        if p == "/api/update/operators/list":
+            return self._send(200, update_ops_list())
+
         if p == "/api/update/operators/check":
             return self._send(200, update_ops_check())
 
@@ -3267,24 +3298,45 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/update/operators/apply":
-            url = str(body.get("url") or "")
-            name = str(body.get("name") or "operators.zip")
-            if not url:
-                return self._send(400, {"ok": False, "error": "no url"})
-            try:
-                import urllib.request
-                req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
-                data = urllib.request.urlopen(req, timeout=60).read()
-            except Exception as e:
-                return self._send(500, {"ok": False, "error": "下载失败：%s" % e})
-            ok, info, err = import_operators_pack(data, name)
-            if not ok:
-                return self._send(500, {"ok": False, "error": err or "导入失败"})
-            cfg = load_cfg()
-            cfg["opPack"] = {"name": name, "at": time.strftime("%Y-%m-%d %H:%M")}
-            save_cfg(cfg)
-            log("operators pack imported: %s" % name)
-            return self._send(200, {"ok": True, "result": info})
+            items = body.get("items")
+            if not isinstance(items, list) or not items:
+                items = [{"url": body.get("url"), "name": body.get("name")}]
+            import urllib.request
+            results, installed = [], []
+            for it in items[:20]:
+                url = str(it.get("url") or "")
+                name = str(it.get("name") or "operators.zip")
+                if not url:
+                    results.append({"name": name, "ok": False, "error": "没有地址"})
+                    continue
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
+                    data = urllib.request.urlopen(req, timeout=120).read()
+                except Exception as e:
+                    results.append({"name": name, "ok": False, "error": "下载失败：%s" % e})
+                    continue
+                ok, info, err = import_operators_pack(data, name)
+                if ok:
+                    installed.append(name)
+                    results.append({"name": name, "ok": True,
+                                    "count": info.get("count", 0),
+                                    "names": info.get("names", []),
+                                    "errors": info.get("errors", [])})
+                else:
+                    results.append({"name": name, "ok": False, "error": err or "导入失败"})
+            if installed:
+                cfg = load_cfg()
+                packs = [p for p in (cfg.get("opPacks") or []) if isinstance(p, dict)]
+                for n in installed:
+                    packs = [p for p in packs if p.get("name") != n]
+                    packs.append({"name": n, "at": time.strftime("%Y-%m-%d %H:%M")})
+                cfg["opPacks"] = packs[-50:]
+                cfg["opPack"] = {"name": installed[-1],
+                                 "at": time.strftime("%Y-%m-%d %H:%M")}
+                save_cfg(cfg)
+                log("operators imported: %s" % ", ".join(installed))
+            return self._send(200, {"ok": bool(installed), "results": results,
+                                    "imported": len(installed)})
 
         if u.path == "/api/update/download":
             url = str(body.get("url") or "")
