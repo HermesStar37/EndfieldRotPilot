@@ -9,6 +9,7 @@
 """
 import base64
 import gzip
+import io
 import json
 import re
 import shutil
@@ -26,8 +27,169 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
+# GitHub 更新
+UPDATE_REPO = "HermesStar37/EndfieldRotPilot"
+UPDATE_API = os.environ.get("ROTPILOT_UPDATE_API", "https://api.github.com")
+UPDATE_MIRROR = os.environ.get("ROTPILOT_UPDATE_MIRROR", "")   # 例如 https://ghproxy.net/
+UPDATE_DIR = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update")
+_UPDATE = {"state": "idle", "received": 0, "total": 0, "path": "", "error": ""}
+
+
+def _ver_tuple(v):
+    nums = re.findall(r"\d+", str(v or ""))
+    return tuple(int(x) for x in nums[:3]) or (0,)
+
+
+def _update_get(url, timeout=15):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot",
+                                               "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def update_check():
+    """读 GitHub 最新 release，和本地版本比。"""
+    try:
+        data = _update_get("%s/repos/%s/releases/latest" % (UPDATE_API.rstrip("/"), UPDATE_REPO))
+    except Exception as e:
+        return {"ok": False, "error": "连不上 GitHub：%s" % e, "current": APP_VERSION}
+    latest = str(data.get("tag_name") or "").strip()
+    assets = data.get("assets") or []
+    url = ""
+    size = 0
+    for a in assets:
+        n = str(a.get("name") or "")
+        if n.lower().endswith(".zip"):
+            url = a.get("browser_download_url") or ""
+            size = int(a.get("size") or 0)
+            break
+    if UPDATE_MIRROR and url:
+        url = UPDATE_MIRROR.rstrip("/") + "/" + url
+    return {"ok": True, "current": APP_VERSION, "latest": latest or APP_VERSION,
+            "newer": bool(latest) and _ver_tuple(latest) > _ver_tuple(APP_VERSION),
+            "notes": (data.get("body") or "")[:6000], "url": url, "size": size,
+            "page": data.get("html_url") or ""}
+
+
+def update_download(url):
+    """后台下载更新包，进度写进 _UPDATE。"""
+    import urllib.request
+    _UPDATE.update({"state": "downloading", "received": 0, "total": 0, "path": "", "error": ""})
+    os.makedirs(UPDATE_DIR, exist_ok=True)
+    path = os.path.join(UPDATE_DIR, "update.zip")
+
+    def run():
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
+            with urllib.request.urlopen(req, timeout=30) as r, open(path, "wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                _UPDATE["total"] = total
+                while True:
+                    chunk = r.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    _UPDATE["received"] += len(chunk)
+            _UPDATE.update({"state": "done", "path": path})
+            log("update downloaded: %s" % path)
+        except Exception as e:
+            _UPDATE.update({"state": "error", "error": str(e)})
+            log("update download fail: %s" % e)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def import_operators_pack(data, filename=""):
+    """导入一个「干员包」（里面可以有多名干员，每个目录一份 operator.json）。"""
+    import tempfile
+    import zipfile
+    if not data:
+        return False, {}, "空文件"
+    tmpdir = tempfile.mkdtemp(prefix="oppack_")
+    zpath = os.path.join(tmpdir, "pack.zip")
+    with open(zpath, "wb") as f:
+        f.write(data)
+    try:
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(tmpdir)
+    except Exception as e:
+        return False, {}, "压缩包打不开：%s" % e
+
+    roots = []
+    for base, _dirs, files in os.walk(tmpdir):
+        if "operator.json" in files:
+            roots.append(base)
+    if not roots:
+        return False, {}, "包里没有 operator.json"
+
+    names, errors = [], []
+    for root in roots:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for fn in os.listdir(root):
+                p = os.path.join(root, fn)
+                if os.path.isfile(p):
+                    z.write(p, fn)
+        ok, info = import_operator_zip(buf.getvalue(), filename)
+        if ok:
+            names.append(info.get("name") if isinstance(info, dict) else str(info))
+        else:
+            errors.append("%s: %s" % (os.path.basename(root), info if not isinstance(info, dict) else info.get("error")))
+    if not names:
+        return False, {}, "；".join(errors[:3]) or "全部导入失败"
+    return True, {"count": len(names), "names": names, "errors": errors[:3]}, ""
+
+
+def update_ops_check():
+    """看最新 Release 里有没有干员包（operators_*.zip）。"""
+    try:
+        data = _update_get("%s/repos/%s/releases/latest" % (UPDATE_API.rstrip("/"), UPDATE_REPO))
+    except Exception as e:
+        return {"ok": False, "error": "连不上 GitHub：%s" % e}
+    asset = None
+    for a in (data.get("assets") or []):
+        n = str(a.get("name") or "")
+        if n.lower().startswith("operators") and n.lower().endswith(".zip"):
+            asset = a
+            break
+    if not asset:
+        return {"ok": True, "found": False, "latest": data.get("tag_name") or ""}
+    cfg = load_cfg()
+    local = (cfg.get("opPack") or {}).get("name") or ""
+    return {"ok": True, "found": True,
+            "name": asset.get("name"), "size": int(asset.get("size") or 0),
+            "url": asset.get("browser_download_url"),
+            "published": asset.get("updated_at") or "",
+            "installed": local, "newer": bool(local) is False or local != asset.get("name")}
+
+def update_apply():
+    """写一个 bat：退出后解压覆盖并重启（保留 config.json）。"""
+    zip_path = _UPDATE.get("path") or ""
+    if not zip_path or not os.path.exists(zip_path):
+        return False, "还没有下载好的更新包"
+    dst = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_new")
+    bat = os.path.join(os.environ.get("TEMP", BASE), "rotpilot_update.bat")
+    inner = os.path.join(dst, "EndfieldRotPilot")
+    exe = os.path.join(BASE, "启动.bat")
+    ps_cmd = "Expand-Archive -LiteralPath '" + zip_path + "' -DestinationPath '" + dst + "' -Force"
+    lines = [
+        "@echo off",
+        "chcp 65001 >nul",
+        "timeout /t 2 /nobreak >nul",
+        'if exist "' + dst + '" rmdir /s /q "' + dst + '"',
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps_cmd + '"',
+        'robocopy "' + inner + '" "' + BASE + '" /E /XF config.json /NFL /NDL /NJH /NJS',
+        'start "" "' + exe + '"',
+        'del "%~f0"',
+    ]
+    with open(bat, "w", encoding="gbk", errors="replace", newline="") as f:
+        f.write("\r\n".join(lines) + "\r\n")
+    import subprocess
+    subprocess.Popen(["cmd", "/c", bat], cwd=BASE, creationflags=0x00000008 | 0x00000200)
+    return True, bat
 # 版本信息（设置里「关于」显示用）
-APP_VERSION = "v1.3.5"
+APP_VERSION = "v1.4"
 APP_BUILD = "2026-10-26"
 
 
@@ -2487,7 +2649,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"ok": False, "error": "文件太大"})
         try:
             import io as _io
-            zf = zipfile.ZipFile(_io.BytesIO(raw))
+            zf = zipfile.ZipFile(io.BytesIO(raw))
         except Exception as e:
             return self._send(400, {"ok": False, "error": "不是有效的 zip：%s" % e})
 
@@ -2596,6 +2758,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(os.path.join(BASE, "ui", "icon.png"))
         if p.startswith("/ui/"):
             return self._file(os.path.join(BASE, p.lstrip("/")))
+
+        if p == "/api/update/operators/check":
+            return self._send(200, update_ops_check())
+
+        if p == "/api/update/check":
+            return self._send(200, update_check())
+
+        if p == "/api/update/progress":
+            return self._send(200, _UPDATE)
 
         if p == "/api/pad_debug":
             raw_pad()
@@ -2847,6 +3018,40 @@ class Handler(BaseHTTPRequestHandler):
             log("quit requested")
             threading.Timer(0.4, lambda: os._exit(0)).start()
             return
+
+        if u.path == "/api/update/operators/apply":
+            url = str(body.get("url") or "")
+            name = str(body.get("name") or "operators.zip")
+            if not url:
+                return self._send(400, {"ok": False, "error": "no url"})
+            try:
+                import urllib.request
+                req = urllib.request.Request(url, headers={"User-Agent": "EndfieldRotPilot"})
+                data = urllib.request.urlopen(req, timeout=60).read()
+            except Exception as e:
+                return self._send(500, {"ok": False, "error": "下载失败：%s" % e})
+            ok, info, err = import_operators_pack(data, name)
+            if not ok:
+                return self._send(500, {"ok": False, "error": err or "导入失败"})
+            cfg = load_cfg()
+            cfg["opPack"] = {"name": name, "at": time.strftime("%Y-%m-%d %H:%M")}
+            save_cfg(cfg)
+            log("operators pack imported: %s" % name)
+            return self._send(200, {"ok": True, "result": info})
+
+        if u.path == "/api/update/download":
+            url = str(body.get("url") or "")
+            if not url:
+                return self._send(400, {"ok": False, "error": "no url"})
+            update_download(url)
+            return self._send(200, {"ok": True})
+
+        if u.path == "/api/update/apply":
+            ok, info = update_apply()
+            if not ok:
+                return self._send(400, {"ok": False, "error": info})
+            threading.Timer(0.8, lambda: os._exit(0)).start()
+            return self._send(200, {"ok": True, "bat": info})
 
         if u.path == "/api/stop":
             ok = False
