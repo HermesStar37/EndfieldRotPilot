@@ -355,7 +355,16 @@ const PAD_OPTS = {
 
 // 连携技可以单独选，Xbox 上允许用面键 A/B/X/Y
 const PAD_LINK_OPTS = {
-  ds: PAD_OPTS.ds,
+  ds: [
+    ["", "未设置"],
+    ["winmm:B1", "□"],
+    ["winmm:B4", "△"],
+    ["winmm:B3", "○"],
+    ["winmm:B2", "×"],
+    ["winmm:B5", "L1"],
+    ["winmm:B6", "R1"],
+    ["winmm:B7", "L2（左扳机）"],
+  ],
   xbox: [
     ["", "未设置"],
     ["xinput:A", "A"],

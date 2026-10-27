@@ -439,7 +439,7 @@ def update_apply():
 
 # 版本信息（设置里「关于」显示用）
 
-APP_VERSION = "v1.4.0"
+APP_VERSION = "v1.4.1"
 APP_BUILD = "2026-10-26"
 
 
@@ -1231,6 +1231,7 @@ PAD_DEFAULT = {
     "modifier": "winmm:B5",         # 组合修饰键（长按）→ DualSense 的 L1
     "slots": ["winmm:B1", "winmm:B4", "winmm:B3", "winmm:B2"],  # □ △ ○ ×
     "link": "winmm:B6",             # R1
+    "ultMod": "winmm:B6",           # R1：和 L1 一起按 + 面键 = 终结技
     "exit": "",                     # 留空 = 键盘 F8
     "reset": "",                    # 留空 = 键盘 F9
 }
@@ -1238,9 +1239,9 @@ PAD_DEFAULT = {
 
 def normalize_pad(raw):
     pad = {"modifier": "", "slots": ["", "", "", ""],
-           "link": "", "exit": "", "reset": ""}
+           "link": "", "ultMod": "", "exit": "", "reset": ""}
     if isinstance(raw, dict):
-        for k in ("modifier", "link", "exit", "reset"):
+        for k in ("modifier", "link", "ultMod", "exit", "reset"):
             v = raw.get(k)
             if isinstance(v, str):
                 pad[k] = v.strip()
@@ -1249,6 +1250,11 @@ def normalize_pad(raw):
             for i in range(min(4, len(sl))):
                 if isinstance(sl[i], str):
                     pad["slots"][i] = sl[i].strip()
+    if not pad["ultMod"]:
+        # 没写就按手柄类型给默认：DS=R1 / Xbox=RB
+        xbox = any(str(pad.get(k) or "").startswith("xinput:")
+                   for k in ("modifier", "link", "slots"))
+        pad["ultMod"] = "xinput:RB" if xbox else "winmm:B6"
     return pad
 
 
@@ -1628,6 +1634,8 @@ class Overlay:
         self.display_mode = "pad" if str(display_mode).lower() == "pad" else "kb"
         self._imgcache = {}
         self.pad_mod = False
+        self.pad_ult_mod = False
+        self.pad_ult_hit = set()
         self._stop_req = False
         self.pad_faces = {}          # 当前按住的面键 slot
         self.pad_link_hit = set()
@@ -2285,7 +2293,22 @@ class Overlay:
                 for slot in list(self.pad_faces):
                     if slot in self.pad_link_hit:
                         continue
-                    self._start_face(slot)
+                    if self.pad_ult_mod:
+                        self.pad_ult_hit.add(slot)
+                        self._fire("ult", slot)
+                    else:
+                        self._start_face(slot)
+            return
+
+        if name == "pad_ult_mod":
+            self.pad_ult_mod = (kind == "down")
+            if self.pad_ult_mod and self.pad_mod:
+                # L1+R1 都在：已经按下的面键升级成终结技
+                for slot in list(self.pad_faces):
+                    if slot in self.pad_link_hit or slot in self.pad_ult_hit:
+                        continue
+                    self.pad_ult_hit.add(slot)
+                    self._fire("ult", slot)
             return
 
         if name.startswith("slot"):
@@ -2295,7 +2318,11 @@ class Overlay:
                 # 丢一次抬手事件（切窗口/重连手柄）不会让这个面键从此按不出战技。
                 self.pad_link_hit.discard(slot)
                 self.pad_faces[slot] = time.time()
-                if self.pad_mod:
+                if self.pad_mod and self.pad_ult_mod:
+                    # L1+R1+面键：和 Alt+数字 一样，直接算终结技
+                    self.pad_ult_hit.add(slot)
+                    self._fire("ult", slot)
+                elif self.pad_mod:
                     self._start_face(slot)
                 elif self._face_is_link(slot):
                     # 这个面键顺便被设成连携键：没按修饰键 → 当连携用
@@ -2308,6 +2335,9 @@ class Overlay:
             self.pad_faces.pop(slot, None)
             key = "pad%02d" % slot
             t0 = self.press_at.pop(key, None)
+            if slot in self.pad_ult_hit:
+                self.pad_ult_hit.discard(slot)
+                return
             if slot in self.pad_link_hit:
                 self.pad_link_hit.discard(slot)
                 return
@@ -2347,6 +2377,8 @@ class Overlay:
 
         if name == "link":
             if kind == "down":
+                if self.pad_mod:
+                    return      # L1+R1+面键 = 终结技组合，R1 别当连携
                 self._fire("link", 1)
             return
 
@@ -2384,6 +2416,8 @@ class Overlay:
                 m.setdefault(rid, []).append("slot%d" % (i + 1))
         if self.pad.get("link"):
             m.setdefault(self.pad["link"], []).append("link")
+        if self.pad.get("ultMod"):
+            m.setdefault(self.pad["ultMod"], []).append("pad_ult_mod")
         return m
 
     def update_pad(self, raw):
@@ -2408,7 +2442,11 @@ class Overlay:
 
     def _maybe_start_face(self, slot):
         if slot in self.pad_faces and self.pad_mod:
-            self._start_face(slot)
+            if self.pad_ult_mod:
+                self.pad_ult_hit.add(slot)
+                self._fire("ult", slot)
+            else:
+                self._start_face(slot)
 
     def _check_long_pad(self, key, slot):
         t0 = self.press_at.get(key)
