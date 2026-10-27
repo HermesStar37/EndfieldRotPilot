@@ -521,6 +521,41 @@ def _fix_names_core():
 
 _fix_names_core()
 
+def _repair_roster_front():
+    """老版本会把新干员塞进 1 号空位，导致名单整体前移、老分享码错位。
+
+    官方名单是从 2 号开始的；所以 1 号位上的人一定是后来导入的。
+    把他挪到末尾，名单顺序就回到原样，老分享码随之恢复正确。
+    """
+    od = os.path.join(CORE_DIR, "operators")
+    rp = os.path.join(od, "roster.json")
+    try:
+        roster = json.load(open(rp, encoding="utf-8-sig")) if os.path.exists(rp) else {}
+    except Exception:
+        return
+    if not isinstance(roster, dict) or "1" not in roster:
+        return
+    keys = sorted(int(k) for k in roster if str(k).isdigit())
+    if not keys or 2 not in keys:
+        return
+    if set(keys) != set(range(1, keys[-1] + 1)):
+        return                       # 号段不连续，别乱动
+    if keys[-1] < 5:
+        return
+    nm = roster.pop("1")
+    new_slot = keys[-1] + 1
+    roster[str(new_slot)] = nm
+    try:
+        tmp = rp + ".fix"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(roster, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, rp)
+        log("roster repaired: %r moved from slot 1 to %d" % (nm, new_slot))
+    except Exception as e:
+        log("roster repair fail: %s" % e)
+
+
+_repair_roster_front()
 def _sync_roster_with_dirs():
     """更新会把官方 roster.json 覆盖回来；把目录里还留着的自制干员补回名单。"""
     od = os.path.join(CORE_DIR, "operators")
@@ -4512,12 +4547,9 @@ def import_operator_zip(data, filename=""):
             slot = int(k)
             break
     if slot is None:
-        for i in range(1, 61):
-            if str(i) not in roster:
-                slot = i
-                break
-        else:
-            slot = max([int(k) for k in roster] or [0]) + 1
+        # 只追加到末尾：填中间的洞会让 core.OPS 的顺序整体前移，
+        # 老分享码是按「名单里的第几个」存的，一移就全错位。
+        slot = max([int(k) for k in roster if str(k).isdigit()] or [0]) + 1
         roster[str(slot)] = name
         with open(rpath, "w", encoding="utf-8") as f:
             json.dump(roster, f, ensure_ascii=False, indent=2)
