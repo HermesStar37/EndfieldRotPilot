@@ -666,9 +666,9 @@ async function boot() {
   state.uiScale = Number(cfg.uiScale) > 0 ? Number(cfg.uiScale) : 1;
   state.nextPreview = cfg.nextPreview !== 0 && cfg.nextPreview !== false;
   state.autoExit = cfg.autoExit === 1 || cfg.autoExit === true;
+  state.restartButton = cfg.restartButton || null;
   state.overlayY = cfg.overlayY ?? 150;
   state.screenMode = cfg.screenMode || "game";
-  state.overlayX = cfg.overlayX ?? null;
   state.inputMode = cfg.inputMode === "pad" ? "pad" : "kb";
   state.padType = cfg.padType === "xbox" ? "xbox" : "ds";
   state.comps = Array.isArray(cfg.comps) ? cfg.comps : [];
@@ -1146,7 +1146,7 @@ function openSettings() {
   if ($("#setScreen")) $("#setScreen").value = state.screenMode || "game";
   refreshScreenHint();
   $("#setOY").value = state.overlayY ?? 150;
-  $("#setOX").value = state.overlayX == null ? "" : state.overlayX;
+  syncRestartTarget();
   if ($("#setLoop")) $("#setLoop").value = state.loopCount == null ? 0 : state.loopCount;
   if ($("#setLoopFrom")) $("#setLoopFrom").value = state.loopFrom || 0;
   if ($("#setLoopTo")) $("#setLoopTo").value = state.loopTo || 0;
@@ -1181,6 +1181,12 @@ function openSettings() {
   refreshPadDevices();
   applyModeUI();
   $("#setModal").classList.remove("hidden");
+  startRestartStatusPolling();
+}
+
+function closeSettings() {
+  $("#setModal").classList.add("hidden");
+  stopRestartStatusPolling();
 }
 
 function saveSettings() {
@@ -1191,15 +1197,12 @@ function saveSettings() {
 
   const sz = parseInt($("#setIcon").value, 10);
   const oy = parseInt($("#setOY").value, 10);
-  const oxRaw = $("#setOX").value.trim();
-  const ox = oxRaw === "" ? null : parseInt(oxRaw, 10);
 
   state.iconSize = Math.max(32, Math.min(140, isNaN(sz) ? 60 : sz));
   const scRaw = parseFloat($("#setScale") ? $("#setScale").value : "");
   state.uiScale = isNaN(scRaw) ? 1 : Math.max(0.7, Math.min(1.5, scRaw));
   state.nextPreview = !($("#nextPrevOff") && $("#nextPrevOff").checked);
   state.overlayY = Math.max(0, Math.min(2000, isNaN(oy) ? 150 : oy));
-  state.overlayX = (ox == null || isNaN(ox) || ox < 0) ? null : ox;
 
   state.displayMode = ($("#modeDisplayPad") && $("#modeDisplayPad").checked) ? "pad" : "kb";
 
@@ -1245,10 +1248,351 @@ function saveSettings() {
   // 运行条正在跑的话，透明度改完立刻生效，不用重新开始
   api.post("/api/overlay/alpha", { opacity: state.opacity }).catch(() => {});
   syncAlphaUI();
-  api.post("/api/state", { overlayX: state.overlayX, overlayY: state.overlayY }).catch(() => {});
+  api.post("/api/state", { overlayY: state.overlayY }).catch(() => {});
   if (modeChanged) applyScreenMode(state.screenMode, true);
   toast("已保存");
 }
+
+/* ---------------- 游戏重开按钮标记 ---------------- */
+let restartWriteBusy = false;
+let restartCaptureTimer = null;
+let restartCaptureGeneration = 0;
+let restartDraft = null;
+let restartStatusTimer = null;
+let restartStatusGeneration = 0;
+let restartStatusAbort = null;
+
+function renderRestartStatus(unavailable = false) {
+  const current = state.restartStatus;
+  let message;
+  if (!state.restartButton) message = "尚未标记重开按钮，请先标记。";
+  else if (!state.restartButton.enabled) message = "自动重新开始已关闭。";
+  else if (current && !current.running) message = "技能轴尚未运行，请先点击「开始运行」。";
+  else message = (current && current.status && current.status.message) || "已标记并启用，正在读取运行状态…";
+  const status = current && current.status;
+  if (state.restartButton && state.restartButton.enabled && current && current.running && status &&
+      status.state === "mismatch") {
+    message += " 请检查标记是否对应当前画面，并将鼠标停在重开按钮上。";
+  }
+  if ($("#restartLiveStatus").textContent !== message) $("#restartLiveStatus").textContent = message;
+  const details = [];
+  if (status && typeof status.captureMs === "number" && Number.isFinite(status.captureMs)) {
+    details.push(`画面检查：${Math.round(status.captureMs)} 毫秒`);
+  }
+  if (status && typeof status.lastClick === "string" && status.lastClick) details.push("最近点击：" + status.lastClick);
+  if (unavailable) details.push("状态暂未更新，稍后自动重试。");
+  $("#restartLiveDetails").textContent = details.join(" · ");
+}
+
+function stopRestartStatusPolling() {
+  ++restartStatusGeneration;
+  clearTimeout(restartStatusTimer);
+  restartStatusTimer = null;
+  if (restartStatusAbort) restartStatusAbort.abort();
+  restartStatusAbort = null;
+}
+
+function startRestartStatusPolling() {
+  stopRestartStatusPolling();
+  if ($("#setModal").classList.contains("hidden")) return;
+  const generation = restartStatusGeneration;
+  const active = () => generation === restartStatusGeneration && !$("#setModal").classList.contains("hidden");
+  const poll = async () => {
+    if (!active()) return;
+    const controller = new AbortController();
+    restartStatusAbort = controller;
+    try {
+      // 状态失败不触发全局断线提示，也不影响设置或覆盖最近一次有效结果。
+      const response = await fetch("/api/battle-restart/status", { cache: "no-store", signal: controller.signal });
+      const result = await response.json();
+      if (!response.ok || !result || !result.ok) throw new Error("读取状态失败");
+      if (!active()) return;
+      state.restartStatus = result;
+      renderRestartStatus();
+    } catch (e) {
+      if (active()) renderRestartStatus(true);
+    } finally {
+      if (restartStatusAbort === controller) restartStatusAbort = null;
+      if (active()) restartStatusTimer = setTimeout(poll, 1000);
+    }
+  };
+  renderRestartStatus();
+  poll();
+}
+
+function refreshRestartStatus() {
+  state.restartStatus = null;
+  renderRestartStatus();
+  startRestartStatusPolling();
+}
+
+function syncRestartTarget() {
+  const target = state.restartButton;
+  $("#setRestartEnabled").checked = !!(target && target.enabled);
+  $("#setRestartEnabled").disabled = !target || restartWriteBusy;
+  $("#btnRestartMark").disabled = restartWriteBusy;
+  $("#btnRestartMark").textContent = target ? "重新标记" : "标记重开按钮";
+  $("#btnRestartClear").disabled = !target || restartWriteBusy;
+  $("#restartTargetStatus").textContent = target
+    ? (target.enabled ? "已标记并启用，设置立即生效。" : "已标记，自动重新开始已关闭。")
+    : "尚未标记重开按钮，请先标记。";
+}
+
+async function setRestartEnabled() {
+  if (!state.restartButton || restartWriteBusy) return syncRestartTarget();
+  const target = { ...state.restartButton, enabled: $("#setRestartEnabled").checked };
+  restartWriteBusy = true;
+  syncRestartTarget();
+  try {
+    const r = await api.post("/api/state", { restartButton: target });
+    if (!r || !r.ok) throw new Error((r && r.error) || "保存失败");
+    state.restartButton = target;
+    refreshRestartStatus();
+    toast(target.enabled ? "自动重新开始已启用，立即生效" : "自动重新开始已关闭，立即生效");
+  } catch (e) { toast("保存开关失败：" + e.message); }
+  finally { restartWriteBusy = false; syncRestartTarget(); }
+}
+
+async function clearRestartTarget() {
+  if (restartWriteBusy) return;
+  restartWriteBusy = true;
+  syncRestartTarget();
+  try {
+    const r = await api.post("/api/battle-restart/target", { clear: true });
+    if (!r || !r.ok) throw new Error((r && r.error) || "清除失败");
+    state.restartButton = null;
+    refreshRestartStatus();
+    toast("标记已清除，立即生效");
+  } catch (e) { toast("清除标记失败：" + e.message); }
+  finally { restartWriteBusy = false; syncRestartTarget(); }
+}
+
+function closeRestartMarker() {
+  if (restartWriteBusy) return;
+  ++restartCaptureGeneration;
+  clearTimeout(restartCaptureTimer);
+  restartCaptureTimer = null;
+  restartDraft = null;
+  $("#restartCanvas").width = 1;
+  $("#restartMarkModal").classList.add("hidden");
+}
+
+function openRestartMarker() {
+  ++restartCaptureGeneration;
+  clearTimeout(restartCaptureTimer);
+  restartDraft = { image: null, button: null, context: null, mode: "button", pending: false };
+  $("#restartSelection").hidden = true;
+  $("#restartCaptureStatus").textContent = "先打开游戏的最终重开确认界面，再开始截图。";
+  $("#restartCapture").textContent = "8 秒后截图";
+  $("#restartSaveHint").textContent = "标记后会自动启用并立即生效；请在设置中查看实际识别状态。";
+  $("#restartZoom").value = "fit";
+  $("#restartMarkModal").classList.remove("hidden");
+  syncRestartSelection();
+}
+
+function syncRestartSelection() {
+  const d = restartDraft;
+  $("#restartCapture").disabled = restartWriteBusy || !!(d && d.pending);
+  $("#restartTargetSave").disabled = restartWriteBusy || !d || !d.button || !d.context || d.pending;
+  $("#restartMarkClose").disabled = restartWriteBusy;
+  $("#restartSelectButton").disabled = restartWriteBusy;
+  $("#restartSelectContext").disabled = restartWriteBusy || !d || !d.button;
+  $("#restartUseButton").disabled = restartWriteBusy || !d || !d.button;
+  $("#restartSelectButton").classList.toggle("on", !!d && d.mode === "button");
+  $("#restartSelectContext").classList.toggle("on", !!d && d.mode === "context");
+  $("#restartSelectionHint").textContent = d && d.mode === "context"
+    ? "第 2 步：框住能辨认这是重开战斗的独特文字（蓝框）。若按钮只写“确认”，请框选弹窗的重开标题，避免把其他确认按钮当作重开。"
+    : "第 1 步：拖动框住最终重开按钮的实际可点击区域（黄框），不要把整个弹窗框进去。";
+}
+
+function fitRestartPreview() {
+  if (!restartDraft || !restartDraft.image) return;
+  const canvas = $("#restartCanvas");
+  const zoom = $("#restartZoom").value;
+  const scale = zoom === "fit"
+    ? Math.min(1, Math.max(1, $("#restartPreview").clientWidth - 2) / canvas.width,
+        Math.max(80, window.innerHeight * 0.44 - 2) / canvas.height)
+    : Number(zoom);
+  canvas.style.width = Math.max(1, Math.round(canvas.width * scale)) + "px";
+  canvas.style.height = Math.max(1, Math.round(canvas.height * scale)) + "px";
+}
+
+function drawRestartSelection() {
+  const d = restartDraft;
+  if (!d || !d.image) return;
+  const canvas = $("#restartCanvas"), ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(d.image, 0, 0);
+  const box = (r, color, fill) => {
+    if (!r) return;
+    ctx.lineWidth = Math.max(2, canvas.width / 500);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = fill;
+    ctx.fillRect(...r);
+    ctx.strokeRect(...r);
+  };
+  box(d.button, "#ffd400", "rgba(255,212,0,.16)");
+  box(d.context, "#5dbaff", "rgba(70,160,255,.16)");
+  if (d.drag) box(restartRectangle(d.drag.start, d.drag.end), "#fff", "rgba(255,255,255,.15)");
+}
+
+function restartCanvasPoint(e) {
+  const c = $("#restartCanvas"), r = c.getBoundingClientRect();
+  return [Math.max(0, Math.min(c.width, (e.clientX - r.left) * c.width / r.width)),
+    Math.max(0, Math.min(c.height, (e.clientY - r.top) * c.height / r.height))];
+}
+
+function restartRectangle(a, b) {
+  const x = Math.floor(Math.min(a[0], b[0])), y = Math.floor(Math.min(a[1], b[1]));
+  return [x, y, Math.ceil(Math.max(a[0], b[0])) - x, Math.ceil(Math.max(a[1], b[1])) - y];
+}
+
+async function startRestartCapture() {
+  if (!restartDraft || restartDraft.pending || restartWriteBusy) return;
+  const generation = ++restartCaptureGeneration;
+  clearTimeout(restartCaptureTimer);
+  const d = restartDraft;
+  Object.assign(d, { image: null, button: null, context: null, drag: null, mode: "button", pending: true, id: null });
+  $("#restartSelection").hidden = true;
+  $("#restartCaptureStatus").textContent = "请切回游戏，停在最终重开确认界面，将鼠标放在重开按钮上；约 8 秒后截图。";
+  syncRestartSelection();
+  const started = Date.now();
+  const show = async (capture) => {
+    if (generation !== restartCaptureGeneration) return;
+    if (!capture || capture.state === "error") throw new Error((capture && capture.error) || "截图失败，请重新截图");
+    if (capture.id && d.id && capture.id !== d.id) throw new Error("截图任务已变更，请重新截图");
+    if (capture.id) d.id = capture.id;
+    if (capture.state !== "ready") {
+      const remaining = Math.max(0, Math.ceil((Number(capture.delay || 8) * 1000 - (Date.now() - started)) / 1000));
+      $("#restartCaptureStatus").textContent = remaining
+        ? `${remaining} 秒后截图：请切回游戏，把鼠标放在最终重开按钮上。`
+        : "正在准备截图，完成后可返回这里框选。";
+      if (Date.now() - started > 45000) throw new Error("截图等待超时，请重试");
+      restartCaptureTimer = setTimeout(poll, 700);
+      return;
+    }
+    if (!capture.image || !capture.id) throw new Error("截图数据不完整，请重新截图");
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("截图无法显示，请重新截图"));
+      img.src = capture.image.startsWith("data:") ? capture.image : "data:image/png;base64," + capture.image;
+    });
+    if (generation !== restartCaptureGeneration) return;
+    if (capture.size && (capture.size[0] !== img.naturalWidth || capture.size[1] !== img.naturalHeight)) {
+      throw new Error("截图尺寸不一致，请重新截图");
+    }
+    d.image = img;
+    d.pending = false;
+    const c = $("#restartCanvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    $("#restartSelection").hidden = false;
+    $("#restartCapture").textContent = "重新截图（8 秒）";
+    $("#restartCaptureStatus").textContent = "截图完成，请依次框选按钮和识别文字。";
+    syncRestartSelection();
+    fitRestartPreview();
+    drawRestartSelection();
+  };
+  const fail = (e) => {
+    if (generation !== restartCaptureGeneration) return;
+    d.pending = false;
+    $("#restartCaptureStatus").textContent = "截图失败：" + e.message;
+    syncRestartSelection();
+  };
+  const poll = async () => {
+    if (generation !== restartCaptureGeneration) return;
+    try {
+      const r = await api.get("/api/battle-restart/capture");
+      if (!r || !r.ok) throw new Error((r && r.error) || "读取截图失败");
+      await show(r.capture);
+    } catch (e) { fail(e); }
+  };
+  try {
+    const r = await api.post("/api/battle-restart/capture", {});
+    if (!r || !r.ok) throw new Error((r && r.error) || "启动截图失败");
+    await show(r.capture);
+  } catch (e) { fail(e); }
+}
+
+async function saveRestartTarget() {
+  const d = restartDraft;
+  if (!d || !d.button || !d.context || restartWriteBusy) return;
+  restartWriteBusy = true;
+  syncRestartTarget();
+  syncRestartSelection();
+  try {
+    const r = await api.post("/api/battle-restart/target", { id: d.id, button: d.button, context: d.context });
+    if (!r || !r.ok || !r.target) throw new Error((r && r.error) || "保存标记失败");
+    state.restartButton = r.target;
+    refreshRestartStatus();
+    restartWriteBusy = false;
+    closeRestartMarker();
+    toast("标记已保存并启用，请查看实际识别状态");
+  } catch (e) { $("#restartSaveHint").textContent = "保存失败：" + e.message; }
+  finally {
+    restartWriteBusy = false;
+    syncRestartTarget();
+    syncRestartSelection();
+  }
+}
+
+function bindRestartControls() {
+  $("#setRestartEnabled").onchange = setRestartEnabled;
+  $("#btnRestartMark").onclick = openRestartMarker;
+  $("#btnRestartClear").onclick = clearRestartTarget;
+  $("#restartMarkClose").onclick = closeRestartMarker;
+  $("#restartCapture").onclick = startRestartCapture;
+  $("#restartZoom").onchange = fitRestartPreview;
+  $("#restartTargetSave").onclick = saveRestartTarget;
+  for (const mode of ["button", "context"]) {
+    $(mode === "button" ? "#restartSelectButton" : "#restartSelectContext").onclick = () => {
+      if (!restartDraft) return;
+      restartDraft.mode = mode;
+      syncRestartSelection();
+    };
+  }
+  $("#restartUseButton").onclick = () => {
+    if (!restartDraft || !restartDraft.button) return;
+    restartDraft.context = restartDraft.button.slice();
+    $("#restartSaveHint").textContent = "已使用按钮文字识别。请确认按钮文字能独特表明重开战斗。";
+    syncRestartSelection();
+    drawRestartSelection();
+  };
+  const c = $("#restartCanvas");
+  c.onpointerdown = (e) => {
+    if (e.button !== 0 || !restartDraft || !restartDraft.image || restartWriteBusy) return;
+    e.preventDefault();
+    const point = restartCanvasPoint(e);
+    restartDraft.drag = { start: point, end: point };
+    c.setPointerCapture(e.pointerId);
+  };
+  c.onpointermove = (e) => {
+    if (!restartDraft || !restartDraft.drag) return;
+    restartDraft.drag.end = restartCanvasPoint(e);
+    drawRestartSelection();
+  };
+  c.onpointerup = (e) => {
+    if (!restartDraft || !restartDraft.drag) return;
+    const d = restartDraft, rect = restartRectangle(d.drag.start, restartCanvasPoint(e));
+    d.drag = null;
+    if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
+    if (rect[2] < 8 || rect[3] < 8) toast("区域太小，请重新拖动框选");
+    else {
+      d[d.mode] = rect;
+      if (d.mode === "button") { d.context = null; d.mode = "context"; }
+      $("#restartSaveHint").textContent = d.context ? "两个区域已选好，可保存标记并启用。" : "按钮已选好，请继续框选独特识别文字。";
+    }
+    syncRestartSelection();
+    drawRestartSelection();
+  };
+  c.onpointercancel = () => {
+    if (restartDraft) restartDraft.drag = null;
+    drawRestartSelection();
+  };
+  window.addEventListener("resize", fitRestartPreview);
+}
+bindRestartControls();
 
 function clearSeq() {
   if (!state.steps.length) return;
@@ -2476,6 +2820,7 @@ function persistSoon() {
   saveTimer = setTimeout(persist, 350);
 }
 const persist = () => api.post("/api/state", {
+  // 重开目标由专用标记/开关接口保存，避免普通设置覆盖刚更新的目标。
   team: state.team, steps: state.steps, teams: state.teams, holdMs: state.holdMs,
   opacity: state.opacity, iconSize: state.iconSize,
   uiScale: state.uiScale || 1, nextPreview: state.nextPreview === false ? 0 : 1,
@@ -3189,8 +3534,8 @@ $("#btnRedo").onclick = redo;
 $("#btnLeft").onclick = () => moveSel(-1);
 $("#btnRight").onclick = () => moveSel(1);
 $("#btnSettings").onclick = openSettings;
-$("#setClose").onclick = () => $("#setModal").classList.add("hidden");
-if ($("#setClose2")) $("#setClose2").onclick = () => $("#setModal").classList.add("hidden");
+$("#setClose").onclick = closeSettings;
+if ($("#setClose2")) $("#setClose2").onclick = closeSettings;
 $("#setSave").onclick = saveSettings;
 
 /* ---------------- 补丁导入 ---------------- */
@@ -3412,6 +3757,10 @@ document.addEventListener("keyup", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
+  if (!$("#restartMarkModal").classList.contains("hidden")) {
+    if (e.key === "Escape") { e.preventDefault(); closeRestartMarker(); }
+    return;
+  }
   if (["TEXTAREA", "INPUT"].includes(e.target.tagName)) return;
   const k = e.key;
   const lower = k.toLowerCase();
