@@ -25,6 +25,8 @@ import zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
+import battle_restart
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- GitHub 更新 ----------
@@ -819,7 +821,22 @@ def _load_cfg_raw():
     return cfg
 
 
-def save_cfg(cfg):
+_CFG_WRITE_LOCK = threading.RLock()
+
+
+def save_cfg(cfg, *, restart_button_changed=False):
+    with _CFG_WRITE_LOCK:
+        # 自动保存、拖动位置等请求可能拿着标记前的旧配置，不能把新标记覆盖掉。
+        if not restart_button_changed:
+            current = load_cfg()
+            if "restartButton" in current:
+                cfg["restartButton"] = current["restartButton"]
+            else:
+                cfg.pop("restartButton", None)
+        _save_cfg_locked(cfg)
+
+
+def _save_cfg_locked(cfg):
     # 每次保存前，把上一版留一份；配置被写坏时可以回来找回
     try:
         if os.path.exists(CFG):
@@ -1616,7 +1633,7 @@ class Overlay:
                  icon_size=60, pos_x=None, pos_y=150, keys=None,
                  input_mode="kb", pad=None, overlay_style="focus", loop_count=0,
                  display_mode="kb", loop_from=0, loop_to=0, screen=None,
-                 ui_scale=1.0, next_preview=True):
+                 ui_scale=1.0, next_preview=True, restart_button=None):
         import tkinter as tk
         self.tk = tk
         # 摆在哪块屏：None = 按配置里的「显示屏幕」自己挑
@@ -1680,6 +1697,17 @@ class Overlay:
         self.press_at = {}
         self.long_fired = set()
         self.running = True
+        self.q = queue.Queue()
+        self._input_generation = 0
+        self._axis_jobs = set()
+        self._finish_job = None
+        self.waiting_restart = False
+        self._restart_watcher = None
+        self._restart_watcher_token = 0
+        self._restart_watcher_error = ""
+        self.auto_restart = bool(
+            isinstance(restart_button, dict) and restart_button.get("enabled")
+            and all(restart_button.get(k) for k in ("button", "context", "size", "exe")))
 
         self.root = tk.Tk()
         self.root.overrideredirect(True)
@@ -1787,6 +1815,9 @@ class Overlay:
         """每 2 秒强制置顶（SWP_NOACTIVATE，不抢焦点）；顺带盯着游戏有没有换屏。"""
         try:
             if not self.running:
+                return
+            if self.waiting_restart:
+                self.root.after(2000, lambda: self._keep_top(tick + 1))
                 return
             try:
                 self.root.attributes("-topmost", True)
@@ -2117,23 +2148,29 @@ class Overlay:
     def _save_pos(self):
         """松手后把运行条位置写进配置（x 绝对，y 用“距这块屏顶部”）。"""
         try:
+            self.root.update_idletasks()
             mons = enum_monitors(force=True)
-            idx = getattr(self, "screen_idx", 0)
-            mon = mons[idx] if 0 <= idx < len(mons) else mons[0]
             x = self.root.winfo_x()
-            y = self.root.winfo_y() - mon["rect"][1]
+            y = self.root.winfo_y()
+            idx = _mon_at(x + self.root.winfo_width() // 2,
+                          y + self.root.winfo_height() // 2, mons)
+            self.screen_idx = idx
+            mon = mons[idx]
+            y -= mon["rect"][1]
             cfg = load_cfg()
             cfg["overlayX"] = int(x)
             cfg["overlayY"] = int(max(0, y))
             cfg["overlayMonitor"] = mon["name"]
             save_cfg(cfg)
-            self.pos_x, self.pos_y = int(x), int(max(0, y))
+            # 单击时仍保持自动居中，实际拖动后才使用手动横坐标。
+            self.pos_x = int(x) if not self.auto_follow else None
+            self.pos_y = int(max(0, y))
             log("overlay pos saved %s,%s (%s)" % (int(x), int(max(0, y)), mon["name"]))
         except Exception as e:
             log("overlay save pos fail %s" % e)
 
     def _place(self):
-        """摆到目标那块屏的工作区里：x 用记录值（没有就居中），y 是“距这块屏顶部”。"""
+        """摆到目标屏工作区：默认水平居中，拖动后保留手动位置，y 是“距顶部”。"""
         self.root.update_idletasks()
         w = self.frame.winfo_reqwidth()
         h = self.frame.winfo_reqheight()
@@ -2143,7 +2180,7 @@ class Overlay:
             idx = pick_screen()
             self.screen_idx = idx
         l, t, r, b = mons[idx]["work"]
-        if self.pos_x is None or int(self.pos_x) < 0:
+        if self.pos_x is None:
             x = l + max(0, (r - l - w) // 2)
         else:
             x = int(self.pos_x)
@@ -2153,7 +2190,7 @@ class Overlay:
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
     def set_screen(self, idx):
-        """换屏：保持水平相对位置、纵向仍按“距顶部”算，然后重摆。"""
+        """换屏：自动居中或保持手动水平相对位置，纵向仍按“距顶部”算。"""
         try:
             mons = enum_monitors(force=True)
             if not (0 <= int(idx) < len(mons)):
@@ -2166,7 +2203,7 @@ class Overlay:
             rel_y = (cy - old["rect"][1]) if old else self.pos_y
             self.screen_idx = idx
             mon = mons[idx]
-            if rel_x is not None:
+            if self.pos_x is not None and rel_x is not None:
                 self.pos_x = mon["rect"][0] + rel_x - max(1, self.root.winfo_width()) // 2
             self.pos_y = max(0, int(rel_y))
             self._place()
@@ -2214,7 +2251,16 @@ class Overlay:
             import ctypes
             u = ctypes.windll.user32
             state = {a: False for a in bind}
+            previous_generation = self._input_generation
             while self.running:
+                generation = self._input_generation
+                if generation != previous_generation:
+                    # 重开时已经按住的键要先松开，不能作为新一轮输入。
+                    state = {a: bool(u.GetAsyncKeyState(vk) & 0x8000)
+                             for a, vk in bind.items()}
+                    previous_generation = generation
+                    time.sleep(0.012)
+                    continue
                 alt_down = bool(u.GetAsyncKeyState(0x12) & 0x8000)   # Alt
                 for act, vk in bind.items():
                     down = bool(u.GetAsyncKeyState(vk) & 0x8000)
@@ -2222,12 +2268,12 @@ class Overlay:
                         state[act] = True
                         # 按住 Alt + 战技键 = 直接放终结技（不用长按）
                         if alt_down and act.startswith("skill"):
-                            self.q.put(("altult", act[-1]))
+                            self._queue_input("altult", act[-1], generation)
                         else:
-                            self.q.put(("down", act))
+                            self._queue_input("down", act, generation)
                     elif not down and state[act]:
                         state[act] = False
-                        self.q.put(("up", act))
+                        self._queue_input("up", act, generation)
                 time.sleep(0.012)
 
         threading.Thread(target=poll, daemon=True).start()
@@ -2246,12 +2292,19 @@ class Overlay:
                 def poll_pad():
                     held = set()
                     silent = 0
+                    previous_generation = self._input_generation
                     while self.running:
+                        generation = self._input_generation
                         try:
                             now = pad_pressed_now()
                         except Exception as e:
                             log("pad read fail %s" % e)
                             time.sleep(0.2)
+                            continue
+                        if generation != previous_generation:
+                            held = now
+                            previous_generation = generation
+                            time.sleep(0.012)
                             continue
                         try:
                             if self._pad_dirty:
@@ -2289,20 +2342,89 @@ class Overlay:
                             if slots:
                                 # 面键：交给 Tk 线程判断是「战技」还是「连携」
                                 for a in slots:
-                                    self.q.put(("down", a))
+                                    self._queue_input("down", a, generation)
                             else:
                                 for a in acts:
-                                    self.q.put(("down", a))
+                                    self._queue_input("down", a, generation)
                         for rid in held - now:
                             acts = raw_map.get(rid) or []
                             for a in acts:
-                                self.q.put(("up", a))
+                                self._queue_input("up", a, generation)
                         held = now
                         time.sleep(0.012)
 
                 threading.Thread(target=poll_pad, daemon=True).start()
 
-    q = queue.Queue()
+    def _queue_input(self, kind, name, generation):
+        """轮询线程只投递本轮输入；旧线程采样不能越过重开边界。"""
+        if self.running and generation == self._input_generation:
+            self.q.put((generation, kind, name))
+
+    def _axis_after(self, delay, callback):
+        """技能轴的延迟任务随重开失效，即使已取出的旧回调也不会执行。"""
+        generation = self._input_generation
+        job = None
+
+        def run():
+            if job not in self._axis_jobs:
+                return
+            self._axis_jobs.discard(job)
+            if self.running and generation == self._input_generation:
+                callback()
+
+        job = self.root.after(delay, run)
+        self._axis_jobs.add(job)
+        return job
+
+    def _invalidate_axis(self):
+        self._input_generation += 1
+        for job in list(self._axis_jobs):
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._axis_jobs.clear()
+        self._finish_job = None
+        if self._tag_job:
+            try:
+                self.root.after_cancel(self._tag_job)
+            except Exception:
+                pass
+            self._tag_job = None
+        self.press_at.clear()
+        self.long_fired.clear()
+        self.pad_faces.clear()
+        self.pad_link_hit.clear()
+        self.pad_ult_hit.clear()
+        self.pad_mod = False
+        self.pad_ult_mod = False
+        # 不保留旧战斗的排队输入，但用户按下的退出仍须生效。
+        controls = []
+        try:
+            while True:
+                event = self.q.get_nowait()
+                if tuple(event[-2:]) == ("down", "exit"):
+                    controls.append(("down", "exit"))
+                elif event[-2] in ("restart_target", "battle_restart"):
+                    controls.append(tuple(event[-2:]))
+        except queue.Empty:
+            pass
+        for event in controls:
+            self.q.put(event)
+
+    def _restart_axis(self, note="战斗重开，从头开始"):
+        """手动归零和游戏重开的统一入口。"""
+        if not self.running:
+            return
+        self._invalidate_axis()
+        self.waiting_restart = False
+        self.seg = 0
+        self.idx = 0
+        self.passes = 0
+        self._reset_groups()
+        if self.segments:
+            self._after_seg_change(note)
+        log("axis restarted")
 
     def _tick(self):
         if self._stop_req:
@@ -2310,7 +2432,13 @@ class Overlay:
             return
         try:
             while True:
-                kind, name = self.q.get_nowait()
+                event = self.q.get_nowait()
+                if len(event) == 3:
+                    generation, kind, name = event
+                    if generation != self._input_generation:
+                        continue
+                else:
+                    kind, name = event
                 try:
                     self._handle(kind, name)
                 except Exception as e:
@@ -2321,6 +2449,23 @@ class Overlay:
             self.root.after(30, self._tick)
 
     def _handle(self, kind, name):
+        if not self.running:
+            return
+        if kind == "restart_target":
+            _replace_restart_watcher(self, name)
+            return
+        if kind == "battle_restart":
+            if self.auto_restart and (name == "" or name == self._restart_watcher_token):
+                self._restart_axis()
+            return
+        if name == "exit" and kind == "down":
+            self.close()
+            return
+        if name == "reset" and kind == "down":
+            self._restart_axis("回到第一段")
+            return
+        if self.waiting_restart:
+            return
         if name == "pad_mod":
             self.pad_mod = (kind == "down")
             if self.pad_mod:
@@ -2365,7 +2510,7 @@ class Overlay:
                     self._fire("link", 1)
                 else:
                     # 同时按下：等 130ms 看修饰键是否跟上
-                    self.root.after(130, lambda s=slot: self._maybe_start_face(s))
+                    self._axis_after(130, lambda s=slot: self._maybe_start_face(s))
                 return
             self.pad_faces.pop(slot, None)
             key = "pad%02d" % slot
@@ -2380,9 +2525,6 @@ class Overlay:
                 self._fire("skill", slot)
             return
 
-        if name == "exit" and kind == "down":
-            self.close()
-            return
         if name == "alphaDown" and kind == "down":
             self._step_alpha(-0.10)
             return
@@ -2404,10 +2546,6 @@ class Overlay:
                 self.left[grp["id"]] = grp["times"]     # 手动回头 = 这一轮重新数
             self._go_g(g, "回反复起点" if inrep else "回本段开头")
             log("jump to repeat start g%d" % g)
-            return
-        if name == "reset" and kind == "down":
-            self._jump_to(0, "回到第一段")
-            log("reset to segment 0")
             return
 
         if name == "link":
@@ -2433,7 +2571,7 @@ class Overlay:
         # skillN：短按=战技，长按=终结技
         if kind == "down":
             self.press_at[name] = time.time()
-            self.root.after(int(self.hold_ms), lambda n=name: self._check_long(n))
+            self._axis_after(int(self.hold_ms), lambda n=name: self._check_long(n))
             return
         t0 = self.press_at.pop(name, None)
         if t0 is None:
@@ -2473,9 +2611,11 @@ class Overlay:
         if key in self.press_at:
             return
         self.press_at[key] = time.time()
-        self.root.after(int(self.hold_ms), lambda k=key, s=slot: self._check_long_pad(k, s))
+        self._axis_after(int(self.hold_ms), lambda k=key, s=slot: self._check_long_pad(k, s))
 
     def _maybe_start_face(self, slot):
+        if slot in self.pad_link_hit or slot in self.pad_ult_hit:
+            return
         if slot in self.pad_faces and self.pad_mod:
             if self.pad_ult_mod:
                 self.pad_ult_hit.add(slot)
@@ -2594,12 +2734,7 @@ class Overlay:
         self._bind_drag(self.frame)
 
     def _goto_start(self):
-        self.seg = 0
-        self.idx = 0
-        self.passes = 0
-        self._render()
-        self._place()
-        self._bind_drag(self.frame)
+        self._restart_axis("回到第一段")
 
     def _focus_main(self):
         try:
@@ -2621,6 +2756,7 @@ class Overlay:
         try:
             if self._tag_job:
                 self.root.after_cancel(self._tag_job)
+                self._axis_jobs.discard(self._tag_job)
         except Exception:
             pass
         try:
@@ -2635,7 +2771,7 @@ class Overlay:
                 pass
             self._tag_job = None
         try:
-            self._tag_job = self.root.after(ms, back)
+            self._tag_job = self._axis_after(ms, back)
         except Exception:
             pass
 
@@ -2764,7 +2900,7 @@ class Overlay:
                 pass
             if note:
                 self._status(note, 1500)
-        self.root.after(120, go)
+        self._axis_after(120, go)
 
     def _jump_to(self, seg, note=""):
         if not self.segments:
@@ -2782,9 +2918,28 @@ class Overlay:
             self.idx = 0
             self._after_seg_change()
             return
-        self.root.after(350, self.close)
+        if self.waiting_restart:
+            return
+        if self.auto_restart:
+            self._invalidate_axis()
+            self._wait_for_restart()
+        else:
+            self._finish_job = self._axis_after(350, self.close)
+
+    def _wait_for_restart(self):
+        """启用识别时只替换末尾关闭任务，保留当前位置和其他排队操作。"""
+        if self._finish_job:
+            try:
+                self.root.after_cancel(self._finish_job)
+            except Exception:
+                pass
+            self._axis_jobs.discard(self._finish_job)
+        self.waiting_restart = True
+        self._finish_job = self._axis_after(350, self.root.withdraw)
 
     def _fire(self, action, slot):
+        if not self.running or self.waiting_restart:
+            return
         if self._skip_passive():
             return
 
@@ -2820,6 +2975,15 @@ class Overlay:
         except Exception:
             pass
         self.running = False
+        self._restart_watcher_token += 1
+        self._invalidate_axis()
+        watcher = self._restart_watcher
+        self._restart_watcher = None
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception as e:
+                log("restart watcher stop fail %s" % e)
         try:
             import keyboard
             keyboard.unhook_all()
@@ -2943,7 +3107,7 @@ def start_overlay(cfg):
             _overlay = Overlay(cfg.get("steps") or [], cfg.get("team") or [],
                                int(cfg.get("holdMs", 280)), clamp_alpha(cfg.get("opacity", 0.94)),
                                int(cfg.get("iconSize") or 60),
-                               cfg.get("overlayX"),
+                               None,  # 每次开启技能轴都水平居中，保留配置中的高度
                                int(cfg.get("overlayY") if cfg.get("overlayY") is not None else 150),
                                cfg.get("keys"),
                                cfg.get("inputMode") or "kb",
@@ -2956,7 +3120,10 @@ def start_overlay(cfg):
                                screen=pick_screen(cfg),
                                ui_scale=cfg.get("uiScale") or 1,
                                next_preview=(str(cfg.get("nextPreview", 1))
-                                             not in ("0", "False", "false", "")))
+                                             not in ("0", "False", "false", "")),
+                               restart_button=cfg.get("restartButton"))
+            # 构造窗口时用户仍可保存标记；发布实例后再读一次，补上此前无法投递的更新。
+            _replace_restart_watcher(_overlay, load_cfg().get("restartButton"))
             _overlay.run()
         except Exception as e:
             log("overlay err %s" % e)
@@ -2968,6 +3135,177 @@ def start_overlay(cfg):
 
     threading.Thread(target=_run, daemon=True).start()
     return True
+
+
+# ---------- 重开按钮标记：整张截图只在内存中短暂保留 ----------
+_RESTART_CAPTURE_LOCK = threading.Lock()
+_RESTART_CAPTURE = {"state": "idle"}
+_RESTART_CAPTURE_TTL = 300
+
+
+def _restart_capture_status():
+    with _RESTART_CAPTURE_LOCK:
+        result = dict(_RESTART_CAPTURE)
+        if (result.get("state") == "ready"
+                and time.time() - result.get("createdAt", 0) > _RESTART_CAPTURE_TTL):
+            _RESTART_CAPTURE.clear()
+            _RESTART_CAPTURE.update(state="error", error="截图已过期，请重新截图")
+            result = dict(_RESTART_CAPTURE)
+        snapshot = result.pop("snapshot", None)
+        if snapshot:
+            result.update({k: snapshot[k] for k in ("image", "size", "exe")})
+        return result
+
+
+def _restart_capture_start():
+    with _RESTART_CAPTURE_LOCK:
+        capture_id = os.urandom(12).hex()
+        _RESTART_CAPTURE.clear()
+        _RESTART_CAPTURE.update(state="pending", id=capture_id, delay=8,
+                                createdAt=time.time())
+        result = dict(_RESTART_CAPTURE)
+
+    def capture():
+        with _RESTART_CAPTURE_LOCK:
+            if _RESTART_CAPTURE.get("id") != capture_id:
+                return
+        try:
+            snapshot = battle_restart.capture_game(game_window())
+            update = {"state": "ready", "snapshot": snapshot}
+        except Exception as e:
+            update = {"state": "error", "error": str(e)}
+            log("restart button capture failed: %s" % e)
+        with _RESTART_CAPTURE_LOCK:
+            if _RESTART_CAPTURE.get("id") == capture_id:
+                _RESTART_CAPTURE.update(update)
+
+    timer = threading.Timer(8, capture)
+    timer.daemon = True
+    timer.start()
+    return result
+
+
+def _restart_target_from_capture(capture_id, button, context):
+    with _RESTART_CAPTURE_LOCK:
+        if (not capture_id or _RESTART_CAPTURE.get("id") != capture_id
+                or _RESTART_CAPTURE.get("state") != "ready"):
+            raise ValueError("截图已失效，请重新截图后标记")
+        if time.time() - _RESTART_CAPTURE.get("createdAt", 0) > _RESTART_CAPTURE_TTL:
+            raise ValueError("截图已过期，请重新截图")
+        snapshot = _RESTART_CAPTURE["snapshot"]
+    target = battle_restart.make_target(snapshot, button, context)
+    cfg = load_cfg()
+    cfg["restartButton"] = target
+    save_cfg(cfg, restart_button_changed=True)
+    _refresh_restart_watcher(target)
+    # 保存的只有两个识别区域，不把整张游戏截图写入配置。
+    with _RESTART_CAPTURE_LOCK:
+        if _RESTART_CAPTURE.get("id") == capture_id:
+            _RESTART_CAPTURE.clear()
+            _RESTART_CAPTURE.update(state="idle")
+    return target
+
+
+def _attach_restart_watcher(overlay, target):
+    if not overlay.running or not overlay.auto_restart:
+        return
+    token = getattr(overlay, "_restart_watcher_token", 0) + 1
+    overlay._restart_watcher_token = token
+    overlay._restart_watcher_error = ""
+
+    def on_restart():
+        if overlay.running and overlay._restart_watcher_token == token:
+            overlay.q.put(("battle_restart", token))
+
+    watcher = None
+    try:
+        watcher = battle_restart.RestartButtonWatcher(
+            target, on_restart, game_window, log)
+        overlay._restart_watcher = watcher
+        watcher.start()
+        log("restart button watcher started")
+    except Exception as e:
+        overlay._restart_watcher_token += 1
+        overlay.auto_restart = False
+        overlay._restart_watcher = None
+        overlay._restart_watcher_error = str(e)[:300]
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception:
+                pass
+        log("restart button watcher unavailable: %s" % e)
+
+
+def _refresh_restart_watcher(target):
+    """HTTP 配置更新只排队，停止识别器和窗口生命周期由 Tk 线程处理。"""
+    overlay = _overlay
+    if overlay is not None and getattr(overlay, "running", False):
+        overlay.q.put(("restart_target", target))
+
+
+def _replace_restart_watcher(overlay, target):
+    if not overlay.running:
+        return
+    overlay._restart_watcher_token += 1
+    old_watcher = overlay._restart_watcher
+    overlay._restart_watcher = None
+    overlay._restart_watcher_error = ""
+    overlay.auto_restart = False
+    if old_watcher is not None:
+        try:
+            old_watcher.stop()
+        except Exception as e:
+            log("restart watcher stop fail %s" % e)
+    if target is not None:
+        try:
+            target = battle_restart.validate_target(target)
+            overlay.auto_restart = target["enabled"]
+        except ValueError as e:
+            overlay._restart_watcher_error = str(e)[:300]
+            log("restart button target unavailable: %s" % e)
+    if overlay.auto_restart:
+        _attach_restart_watcher(overlay, target)
+    elif old_watcher is not None:
+        log("restart button watcher disabled")
+    if overlay.waiting_restart and not overlay.auto_restart:
+        overlay.close()
+    elif (overlay.auto_restart and not overlay.waiting_restart
+          and overlay._g() >= overlay.total):
+        overlay._wait_for_restart()
+
+
+def _restart_watcher_status():
+    target = load_cfg().get("restartButton")
+    overlay = _overlay
+    running = bool(overlay is not None and getattr(overlay, "running", False))
+    enabled = bool(isinstance(target, dict) and target.get("enabled"))
+    status = {"state": "inactive", "message": "请开始运行技能轴"}
+    watcher = getattr(overlay, "_restart_watcher", None) if running else None
+    if running:
+        error = getattr(overlay, "_restart_watcher_error", "")
+        if enabled and error:
+            status = {"state": "error", "message": "自动重开识别启动失败：%s。可重新启用后重试。" % error}
+        elif enabled and watcher is None:
+            status = {"state": "starting", "message": "正在应用自动重开设置并启动识别…"}
+        elif watcher is not None:
+            status = {"state": "watching", "message": "自动重开识别已启动，等待状态更新…"}
+        else:
+            status = {"state": "inactive", "message": ("自动重开识别已关闭。" if target
+                                                         else "请先标记重开按钮。")}
+    reader = getattr(watcher, "status", None)
+    if callable(reader):
+        try:
+            current = reader()
+            if isinstance(current, dict):
+                status = current
+        except Exception as e:
+            status = {"state": "error", "message": str(e)}
+    return {"ok": True, "running": running,
+            "enabled": enabled,
+            "active": bool(running and getattr(overlay, "auto_restart", False)),
+            "waiting": bool(running and getattr(overlay, "waiting_restart", False)),
+            "status": status}
 
 
 # ---------------- HTTP ----------------
@@ -3230,6 +3568,12 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/state":
             return self._send(200, load_cfg())
 
+        if p == "/api/battle-restart/capture":
+            return self._send(200, {"ok": True, "capture": _restart_capture_status()})
+
+        if p == "/api/battle-restart/status":
+            return self._send(200, _restart_watcher_status())
+
         if p == "/api/ops":
             _refresh_roster_if_changed()
             recent = [str(x) for x in (load_cfg().get("recentOps") or [])]
@@ -3344,13 +3688,37 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin") or ""
         if not self._origin_ok(origin):
             return self._send(403, {"ok": False, "error": "forbidden origin"})
-        if u.path in ("/api/state", "/api/run", "/api/quit", "/api/restart"):
+        if u.path in ("/api/state", "/api/run", "/api/quit", "/api/restart",
+                      "/api/battle-restart/capture", "/api/battle-restart/target"):
             ctype = (self.headers.get("Content-Type") or "").lower()
             if "application/json" not in ctype:
                 return self._send(403, {"ok": False, "error": "need json"})
 
+        if u.path == "/api/battle-restart/capture":
+            return self._send(200, {"ok": True, "capture": _restart_capture_start()})
+
+        if u.path == "/api/battle-restart/target":
+            try:
+                if body.get("clear") is True:
+                    cfg = load_cfg()
+                    cfg["restartButton"] = None
+                    save_cfg(cfg, restart_button_changed=True)
+                    _refresh_restart_watcher(None)
+                    return self._send(200, {"ok": True, "target": None})
+                target = _restart_target_from_capture(
+                    body.get("id"), body.get("button"), body.get("context"))
+                return self._send(200, {"ok": True, "target": target})
+            except ValueError as e:
+                return self._send(400, {"ok": False, "error": str(e)})
+
         if u.path == "/api/state":
             cfg = load_cfg()
+            if "restartButton" in body:
+                try:
+                    cfg["restartButton"] = (battle_restart.validate_target(body["restartButton"])
+                                            if body["restartButton"] is not None else None)
+                except ValueError as e:
+                    return self._send(400, {"ok": False, "error": str(e)})
             # 防误清：空轴不许覆盖有内容的轴（除非明确 force）
             if (isinstance(body.get("steps"), list) and not body["steps"]
                     and (cfg.get("steps") or []) and not body.get("force")):
@@ -3375,7 +3743,9 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["pad"] = body["pad"] if isinstance(body["pad"], (dict, type(None))) else cfg.get("pad")
             cfg["opacity"] = clamp_alpha(cfg.get("opacity", ALPHA_DEFAULT))
             cfg["keys"] = normalize_keys(cfg.get("keys"))
-            save_cfg(cfg)
+            save_cfg(cfg, restart_button_changed="restartButton" in body)
+            if "restartButton" in body:
+                _refresh_restart_watcher(cfg.get("restartButton"))
             # 手柄键位改了：正在跑的运行条立即换绑，不用重开
             if overlay_busy():
                 try:

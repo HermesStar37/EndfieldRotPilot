@@ -6,7 +6,7 @@
 <link rel="icon" type="image/png" href="/ui/icon.png?v=155">
 <link rel="shortcut icon" href="/ui/favicon.ico?v=155">
 <link rel="apple-touch-icon" href="/ui/icon.png?v=155">
-<link rel="stylesheet" href="/ui/style.css?v=156">
+<link rel="stylesheet" href="/ui/style.css?v=158">
 </head>
 <body>
 <header class="topbar">
@@ -202,6 +202,19 @@
               <label class="mode-opt"><input type="radio" name="nextPrev" value="1" id="nextPrevOn"> 显示</label>
               <label class="mode-opt"><input type="radio" name="nextPrev" value="0" id="nextPrevOff"> 不显示</label>
             </span></div>
+          <div class="set-sub">重开战斗后自动重新开始</div>
+          <div class="set-row"><label for="setRestartEnabled">自动重新开始技能轴</label>
+            <input id="setRestartEnabled" type="checkbox" disabled></div>
+          <div class="hint" id="restartTargetStatus" role="status">尚未标记重开按钮，请先标记。</div>
+          <div class="restart-live">
+            <div id="restartLiveStatus" role="status">打开设置后显示当前识别状态。</div>
+            <div class="hint" id="restartLiveDetails"></div>
+          </div>
+          <div class="restart-actions">
+            <button class="mini" id="btnRestartMark" type="button">标记重开按钮</button>
+            <button class="mini" id="btnRestartClear" type="button" disabled>清除标记</button>
+          </div>
+          <div class="hint">点击游戏中已标记的最终重开按钮后，技能轴会回到第一步。标记和开关自动保存并立即生效；技能轴需要处于运行状态。</div>
         </section>
 
         <!-- 屏幕与显示 -->
@@ -215,7 +228,7 @@
             </select></div>
           <div class="hint" style="margin:0 0 10px" id="screenHint">正在检测显示器…</div>
           <div class="set-row"><label>距屏幕顶部（px）</label><input id="setOY" type="number" min="0" max="2000" step="10"></div>
-          <div class="set-row"><label>水平位置（留空 = 居中）</label><input id="setOX" type="number" min="0" max="4000" step="10" placeholder="居中"></div>
+          <div class="hint" style="margin:0 0 10px">每次开启技能轴时自动水平居中；运行期间可以拖动调整位置。</div>
 
           <div class="set-sub">运行条上显示什么</div>
           <div class="set-row"><label>按键显示</label>
@@ -349,8 +362,36 @@
   </div>
 </div>
 
+<div class="modal hidden" id="restartMarkModal" role="dialog" aria-modal="true" aria-labelledby="restartMarkTitle">
+  <div class="modal-card restart-mark-card">
+    <div class="modal-head"><span id="restartMarkTitle">标记重开按钮</span><button class="x" id="restartMarkClose" type="button" aria-label="关闭标记窗口">×</button></div>
+    <p class="restart-guide">先在游戏里打开最后一步重开确认界面。点击「8 秒后截图」后切回游戏，把鼠标放在最终重开按钮上；截图完成后回到这里框选。</p>
+    <div class="restart-actions">
+      <button class="primary" id="restartCapture" type="button">8 秒后截图</button>
+      <span class="hint" id="restartCaptureStatus" role="status">首次标记需要截图。</span>
+    </div>
+    <div id="restartSelection" hidden>
+      <div class="restart-actions">
+        <button class="mini" id="restartSelectButton" type="button">1. 框选按钮区域</button>
+        <button class="mini" id="restartSelectContext" type="button" disabled>2. 框选识别文字</button>
+        <label class="hint">预览缩放 <select id="restartZoom" aria-label="截图预览缩放"><option value="fit">完整显示</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select></label>
+      </div>
+      <p class="restart-guide" id="restartSelectionHint"></p>
+      <div class="restart-preview" id="restartPreview"><canvas id="restartCanvas" aria-label="游戏截图：拖动框选按钮及识别文字区域"></canvas></div>
+      <div class="restart-actions">
+        <button class="mini" id="restartUseButton" type="button" disabled>直接使用按钮区域识别</button>
+        <span class="hint">仅当按钮本身写有独特的「重新开始 / 重启战斗」文字时使用。</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint" id="restartSaveHint">标记后会自动启用并立即生效；请在设置中查看实际识别状态。</span>
+      <button class="primary" id="restartTargetSave" type="button" disabled>保存标记并启用</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="opFile" accept=".zip" style="display:none">
 <div class="toast" id="toast"></div>
-<script src="/ui/app.js?v=156"></script>
+<script src="/ui/app.js?v=158"></script>
 </body>
 </html>

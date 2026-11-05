@@ -700,6 +700,24 @@ button{white-space:nowrap}
 .set-panes::-webkit-scrollbar-track{background:#efe9d8}
 .set-panes::-webkit-scrollbar-thumb{background:var(--ink);border:2px solid #efe9d8}
 
+/* 重开按钮标记：原图坐标绘制，默认缩放到整张截图可见。 */
+.restart-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0}
+.restart-actions input[type="checkbox"]{accent-color:var(--ink)}
+#setRestartEnabled{width:18px;height:18px;accent-color:var(--ink);flex:0 0 auto}
+#restartMarkModal{z-index:60}
+.restart-mark-card{width:min(1120px,94vw);max-height:94vh}
+.restart-guide{font-size:12px;line-height:1.65;margin:0 0 8px;color:var(--ink-2)}
+.restart-preview{max-height:44vh;overflow:auto;background:#13171d;border:1px solid var(--line);margin:8px 0}
+.restart-preview canvas{display:block;touch-action:none;cursor:crosshair;max-width:none}
+#restartSelection[hidden]{display:none}
+#restartZoom{font:inherit;background:#fff;border:1px solid var(--line-2);padding:4px}
+.restart-actions .mini.on{background:var(--yellow);border-color:var(--ink)}
+#restartCaptureStatus,#restartTargetStatus{overflow-wrap:anywhere}
+.restart-live{margin:10px 0;padding:10px;border:1px solid var(--line-2);background:#fffdf2;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.restart-live .hint:empty{display:none}
+.restart-live .hint{margin-top:4px}
+.restart-mark-card .modal-foot{gap:12px}
+
 @media (max-width:640px){
   .set-card{height:min(86vh,760px)}
   .set-wrap{flex-direction:column}
